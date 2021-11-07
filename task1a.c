@@ -8,16 +8,13 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <limits.h>
 
-// #define ENABLE_LOGGING
 
-#define FIFODIR "/tmp/myfifo"
+#define FIFODIR "/tmp"
 #define FIFONAME_SAMPLE (FIFODIR "/fifo----------")
-#define FIFONAME_LEN 27
-#define PREFIX_LEN 16
+#define FIFONAME_LEN 20
 
-#define PID_TR_LEN 16
-#define MAX_FIFOS 999999
 
 #define INPUT_BUFFER_LEN 2 * 1024 * 1024
 
@@ -33,7 +30,7 @@
 
 int openProcess (const char *filename);
 int openProcesses (const char *filename1, const char *filename2);
-int writeProcess (int pid);
+int writeProcess (void);
 int writeProcesses (void);
 
 
@@ -56,7 +53,7 @@ int main (int argc, const char **argv)
         return writeProcesses ();
 
     else if (strcmp (argv[1], "-write") == 0)
-        return writeProcess (getpid ());
+        return writeProcess ();
 
     else
     {
@@ -67,19 +64,6 @@ int main (int argc, const char **argv)
 }
 
 
-int getFifoNumber ()
-{
-    int ret = fork ();
-    if (ret == 0)
-        exit (0);
-    return ret;
-}
-
-void createFifoName (char *sample, int num)
-{
-    strcpy (sample, FIFONAME_SAMPLE);
-    sprintf (sample + FIFONAME_LEN - 11, "%10d", num);
-}
 
 
 int openProcess (const char *filename)
@@ -89,36 +73,32 @@ int openProcess (const char *filename)
     // creating directory for fifos
     PERROR (mkdir (FIFODIR, S_IRWXG | S_IRWXO | S_IRWXU) != -1 || errno == EEXIST);
 
-    // creating unique name for fifo
-    int fifoNumber = getFifoNumber ();
-    char fifoname [FIFONAME_LEN];
-    createFifoName (fifoname, fifoNumber);
-    mkfifo (fifoname, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
-
     // creating default fifo
-    mkfifo (FIFONAME_SAMPLE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
-    int descrip = open (FIFONAME_SAMPLE, O_WRONLY);
+    mkfifo (FIFONAME_SAMPLE, 0666);
+    int descrip = open (FIFONAME_SAMPLE, O_RDWR | O_NONBLOCK);
     PERROR (descrip != -1);
     LOG ("%s", "Opened default fifo\n");
 
-    // writing unique fifo number to default fifo
-    write (descrip, &fifoNumber, sizeof (fifoNumber));
-    LOG ("Printed %d to default fifo\n", fifoNumber);
+    // wait for pair process to open for reading
+    sleep (5);
 
-    // creating fifo with unique name
-    int descripUnique = open (fifoname, O_WRONLY);
-    PERROR (descripUnique != -1);
-    LOG ("Created %s\n", fifoname);
+    // trying to write pathname to fifo
+    char filenameBuffer [PATH_MAX + 1];
+    int pathLen = strlen (filename);
+    if (pathLen > PATH_MAX)
+    {
+        printf ("name too long\n");
+        goto cleanup;
+    }
+    memcpy (filenameBuffer, filename, pathLen + 1);
+    // PERROR (fcntl (descrip, F_SETFD, O_RDWR| O_NONBLOCK) != -1);
+    PERROR (write (descrip, filenameBuffer, PATH_MAX) != -1);
 
-    // writing filename to unique fifo
-    char filenameBuffer [5004];
-    strcpy (filenameBuffer, filename);
-    write (descripUnique, filenameBuffer, 5004);
+    LOG ("Wrote %s to %s\n", filenameBuffer, FIFONAME_SAMPLE);
 
-    LOG ("Wrote %s to %s\n", filenameBuffer, fifoname);
-
-    //close (descrip);
-    //close (descripUnique);
+    cleanup:
+    close (descrip);
+    unlink (FIFONAME_SAMPLE);  
 
     return 0;
 }
@@ -161,55 +141,32 @@ void printFile (const char *filename)
 }
 
 
-int getFifoName (int pid)
-{
-    mkfifo (FIFONAME_SAMPLE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+int writeProcess ()
+{   
+    // Opening fifo
+    mkfifo (FIFONAME_SAMPLE, 0666);
     int descrip = open (FIFONAME_SAMPLE, O_RDONLY);
     if (descrip <= 0)
         LOG ("Cannot open %s\n", FIFONAME_SAMPLE);
     LOG ("Opened %s\n", FIFONAME_SAMPLE);
 
-    int num = 0;
-    read (descrip, &num, sizeof (num));
-    LOG ("Got file num %d\n", num);
-
-    //close (descrip);
-    return num;
-}
-
-
-int writeProcess (int pid)
-{
-    if (pid != 0) sleep (3);
-    /* после этого ребёнок виснет, т.к. закрылись все дескрипторы на запись. */
-    /* зависание без слипа - успевает открыть фифо, но не может читать */
-    /* вариант решения - не закрывать фифо, но анлинкать? */
-    
-    // Reading unique fifo name
-    int num = getFifoName (pid);
-
-    // Generating unique fifo name
-    char fifoname [FIFONAME_LEN];
-    createFifoName (fifoname, num);
-
-    // Opening unique fifo    
-    mkfifo (fifoname, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
-    int descripUnique = open (fifoname, O_RDONLY);
-    if (descripUnique <= 0)
-        LOG ("Cannot open %s\n", fifoname);
-    LOG ("Opened %s\n", fifoname);
-
     // Getting file name
-    char filename [5004] = {1, 2, 3, 4};
-    read (descripUnique, filename, 5004);
+    char filename [PATH_MAX] = {1, 2, 3, 4};
+    int bytesRead = read (descrip, filename, PATH_MAX);
+    PERROR (bytesRead != -1);
     LOG ("Got filename %s(%X...)\n", filename, *(int*)filename);
+    
 
-    // Priniting file to console
-    printFile (filename);
-    //close (descripUnique);
-
-    unlink (fifoname);
+    close (descrip);
     unlink (FIFONAME_SAMPLE);
+
+
+    if (bytesRead == 0 || bytesRead == -1)
+        printf ("Logical error: pipe is empty\n");
+    else
+        printFile (filename);
+
+
     return 0;
 
 }
@@ -228,7 +185,7 @@ int writeProcesses ()
 {
     LOG ("%s", "Parent\n");
     pid_t pid = fork ();
-    writeProcess (pid);
+    writeProcess ();
     if (pid > 0) waitpid (pid, 0, 0);
     return 0;
 }
