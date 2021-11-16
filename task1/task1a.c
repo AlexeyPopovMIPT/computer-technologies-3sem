@@ -12,11 +12,10 @@
 
 
 #define FIFODIR "/tmp"
-#define FIFONAME_SAMPLE (FIFODIR "/fifo----------")
-#define FIFONAME_LEN 20
+#define FIFONAME (FIFODIR "/fifo----------")
 
 
-#define INPUT_BUFFER_LEN 2 * 1024 * 1024
+#define INPUT_BUFFER_LEN (2 * 1024 * 1024)
 
 
 
@@ -28,8 +27,8 @@
 #define PERROR(condition) { if (!(condition)) { perror ("ERROR"); } }
 #endif
 
-int openProcess (const char *filename);
-int openProcesses (const char *filename1, const char *filename2);
+int openProcess (const char *path);
+int openProcesses (const char *path1, const char *path2);
 int writeProcess (void);
 int writeProcesses (void);
 
@@ -66,7 +65,7 @@ int main (int argc, const char **argv)
 
 
 
-int openProcess (const char *filename)
+int openProcess (const char *path)
 {
     LOG ("%s", "Process started for reading\n");
 
@@ -74,8 +73,8 @@ int openProcess (const char *filename)
     PERROR (mkdir (FIFODIR, S_IRWXG | S_IRWXO | S_IRWXU) != -1 || errno == EEXIST);
 
     // creating default fifo
-    mkfifo (FIFONAME_SAMPLE, 0666);
-    int descrip = open (FIFONAME_SAMPLE, O_RDWR | O_NONBLOCK);
+    mkfifo (FIFONAME, 0666);
+    int descrip = open (FIFONAME, O_RDWR | O_NONBLOCK);
     PERROR (descrip != -1);
     LOG ("%s", "Opened default fifo\n");
 
@@ -84,31 +83,31 @@ int openProcess (const char *filename)
 
     // trying to write pathname to fifo
     char filenameBuffer [PATH_MAX + 1];
-    int pathLen = strlen (filename);
+    int pathLen = strlen (path);
     if (pathLen > PATH_MAX)
     {
         printf ("name too long\n");
         goto cleanup;
     }
-    memcpy (filenameBuffer, filename, pathLen + 1);
+    memcpy (filenameBuffer, path, pathLen + 1);
     // PERROR (fcntl (descrip, F_SETFD, O_RDWR| O_NONBLOCK) != -1);
     PERROR (write (descrip, filenameBuffer, PATH_MAX) != -1);
 
-    LOG ("Wrote %s to %s\n", filenameBuffer, FIFONAME_SAMPLE);
+    LOG ("Wrote %s to %s\n", filenameBuffer, FIFONAME);
 
     cleanup:
     close (descrip);
-    unlink (FIFONAME_SAMPLE);  
+    unlink (FIFONAME);  
 
     return 0;
 }
 
 
-void printFile (const char *filename)
+void printFile (const char *path)
 {
-    int descrip = open (filename, O_RDONLY);
+    int descrip = open (path, O_RDONLY);
     if (descrip <= 0)
-        LOG ("Cannot open %s\n", filename);
+        LOG ("Cannot open %s\n", path);
     
     char * const buffer = (char * const) malloc (INPUT_BUFFER_LEN);
     if (buffer == NULL)
@@ -144,11 +143,11 @@ void printFile (const char *filename)
 int writeProcess ()
 {   
     // Opening fifo
-    mkfifo (FIFONAME_SAMPLE, 0666);
-    int descrip = open (FIFONAME_SAMPLE, O_RDONLY);
+    mkfifo (FIFONAME, 0666);
+    int descrip = open (FIFONAME, O_RDONLY);
     if (descrip <= 0)
-        LOG ("Cannot open %s\n", FIFONAME_SAMPLE);
-    LOG ("Opened %s\n", FIFONAME_SAMPLE);
+        LOG ("Cannot open %s\n", FIFONAME);
+    LOG ("Opened %s\n", FIFONAME);
 
     // Getting file name
     char filename [PATH_MAX] = {1, 2, 3, 4};
@@ -158,7 +157,7 @@ int writeProcess ()
     
 
     close (descrip);
-    unlink (FIFONAME_SAMPLE);
+    unlink (FIFONAME);
 
 
     if (bytesRead == 0 || bytesRead == -1)
@@ -172,11 +171,11 @@ int writeProcess ()
 }
 
 
-int openProcesses (const char *filename1, const char *filename2)
+int openProcesses (const char *path1, const char *path2)
 {
     LOG ("%s", "Parent\n");
     pid_t pid = fork ();
-    openProcess (pid ? filename1 : filename2);
+    openProcess (pid ? path1 : path2);
     if (pid > 0) waitpid (pid, 0, 0);
     return 0;
 }
