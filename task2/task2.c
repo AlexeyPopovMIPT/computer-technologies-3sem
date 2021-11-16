@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <signal.h>
+
 
 #ifndef NDEBUG
 #define LOG(...) { printf (__VA_ARGS__); fflush (stdout); }
@@ -13,10 +15,18 @@
 #define LOG(...) ;
 #endif
 
+#define ALARM_TIME 5
 void usage (int argc, const char **argv)
 {
     printf ("Usage: %s [d]\n", argv[0]);
 }
+
+void handler (void)
+{
+    printf ("Out of time\n");
+    exit (-1);
+}
+
 
 int childStuff (int i, int cnt, int queueId)
 {
@@ -27,6 +37,8 @@ int childStuff (int i, int cnt, int queueId)
         long type;
         char buf [5];
     } msg;
+
+    alarm (ALARM_TIME);
 
     int rcv = msgrcv (queueId, &msg, 5, i, 0);
     if (-1 == rcv)
@@ -44,6 +56,7 @@ int childStuff (int i, int cnt, int queueId)
     printf ("Child no %d, pid = %d\n", i, getpid ());
 
     msg.type++;
+    if (i == 2) goto cleanup;
     
     msgsnd (queueId, &msg, 5, 0);
 
@@ -76,6 +89,10 @@ int main (int argc, const char **argv)
     }
 
     LOG ("Parent: created queue id=%d\n", queueId);
+
+    struct sigaction act = { };
+    act.sa_handler = (sig_t) handler;
+    sigaction (SIGALRM, &act, NULL);
 
     int exitcode = 0;
 
@@ -112,6 +129,8 @@ int main (int argc, const char **argv)
     }
 
     LOG ("Parent: sent message, msgsnd=%d\n", snd);
+
+    alarm (ALARM_TIME);
 
     int rcv = msgrcv (queueId, &msg, 5, cnt + 1, 0);
     if (-1 == rcv)
