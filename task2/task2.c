@@ -18,26 +18,9 @@ void usage (int argc, const char **argv)
     printf ("Usage: %s [d]\n", argv[0]);
 }
 
-void getPath (char *filename) // "/tmp/keypath00"
-{
-    for (int i = 0; i < 100; i++)
-    {
-        sprintf (filename + 12, "%02d", i);
-        int fd = creat (filename, 0666);
-        if (fd > 0)
-        {
-            close (fd);
-            return;
-        }
-    }
-    *filename = '\0';
-}
-
-int childStuff (key_t key, int i, int cnt, int queueId)
+int childStuff (int i, int cnt, int queueId)
 {
     int exitcode = 0;
-    // int slt = sleep (2);
-    // LOG ("Child no %d: underslept %d\n", i, slt);
             
     struct 
     {
@@ -60,15 +43,11 @@ int childStuff (key_t key, int i, int cnt, int queueId)
           (int)(message[3]), (int)(message[4]), rcv);
     printf ("Child no %d, pid = %d\n", i, getpid ());
 
-    if (i != cnt)
-    {
-        msg.type++;
-        msgsnd (queueId, &msg, 5, 0);
-    }
+    msg.type++;
+    
+    msgsnd (queueId, &msg, 5, 0);
 
     cleanup:
-    if (i == cnt)
-        msgctl (queueId, IPC_RMID, NULL);
     exit (exitcode);
 }
 
@@ -88,19 +67,8 @@ int main (int argc, const char **argv)
         usage (argc, argv);
         return 0;
     }
-
-    char pathname [] = "/tmp/keypath00";
-    getPath (pathname);
-
-    if (*pathname == '\0')
-    {
-        printf ("Can\'t create file for key generating\n");
-        return -1;
-    }
-
-    key_t key = ftok (pathname, 0);
-
-    int queueId = msgget (key, IPC_CREAT | 0666);
+    
+    int queueId = msgget (IPC_PRIVATE, IPC_CREAT | 0666);
     if (queueId < 0)
     {
         perror ("Can\'t set up a queue");
@@ -109,21 +77,23 @@ int main (int argc, const char **argv)
 
     LOG ("Parent: created queue id=%d\n", queueId);
 
+    int exitcode = 0;
+
     for (int i = 1; i <= cnt; i++)
     {
         pid_t pid = fork ();
 
         if (pid == 0)
         {
-            childStuff (key, i, cnt, queueId); 
+            childStuff (i, cnt, queueId); 
             exit (0);  
         }
 
         else if (pid == -1)
         {
             perror ("Can\'t fork child");
-            msgctl (queueId, IPC_RMID, NULL);
-            return -1;
+            exitcode = -1;
+            goto cleanup;
         }
     }
 
@@ -137,11 +107,26 @@ int main (int argc, const char **argv)
     if (-1 == snd)
     {
         perror ("Parent: Can\'t send message");
-        msgctl (queueId, IPC_RMID, NULL);
-        return -1;
+        exitcode = -1;
+        goto cleanup;
     }
 
     LOG ("Parent: sent message, msgsnd=%d\n", snd);
+
+    int rcv = msgrcv (queueId, &msg, 5, cnt + 1, 0);
+    if (-1 == rcv)
+    {
+        LOG ("%s", "Parent: ");
+        perror ("Can\'t read message");
+        exitcode = -1;
+        goto cleanup;
+    }
+
+    LOG ("Parent: reseived message, msgrcv=%d\n", rcv);
+
+    cleanup:
+    msgctl (queueId, IPC_RMID, NULL);
+    return exitcode;
 
 }
 
