@@ -16,6 +16,8 @@
 #endif
 
 #define ALARM_TIME 5
+
+
 void usage (int argc, const char **argv)
 {
     printf ("Usage: %s [d]\n", argv[0]);
@@ -53,10 +55,10 @@ int childStuff (int i, int cnt, int queueId)
     LOG ("Child no %d, pid = %d, message=%s(%02X %02X %02X %02X %02X), msgrcv=%d\n",
           i, getpid (), message, (int)(message[0]), (int)(message[1]), (int)(message[2]), 
           (int)(message[3]), (int)(message[4]), rcv);
-    printf ("Child no %d, pid = %d\n", i, getpid ());
+    printf ("%d ", i);
+    fflush (stdout);
 
     msg.type++;
-    if (i == 2) goto cleanup;
     
     msgsnd (queueId, &msg, 5, 0);
 
@@ -103,7 +105,7 @@ int main (int argc, const char **argv)
         if (pid == 0)
         {
             childStuff (i, cnt, queueId); 
-            exit (0);  
+            abort ();
         }
 
         else if (pid == -1)
