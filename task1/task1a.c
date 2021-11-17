@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 #include <sys/wait.h>
 #include <string.h>
 #include <unistd.h>
@@ -38,7 +37,7 @@ int main (int argc, const char **argv)
 {
     if (argc == 1)
     {
-        printf ("Usage: %s [-open <string>] or [-write]\n", argv[0]);
+        printf ("Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
         return 0;
     }
 
@@ -57,7 +56,7 @@ int main (int argc, const char **argv)
     else
     {
         printf ("%s: Unknown option: %s\n", argv[0], argv[1]);
-        printf ("Usage: %s [-open <string>] or [-write]\n", argv[0]);
+        printf ("Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
         return 0;
     }
 }
@@ -69,27 +68,31 @@ int openProcess (const char *path)
 {
     LOG ("%s", "Process started for reading\n");
 
-    // creating directory for fifos
+    // creating directory for fifo
     PERROR (mkdir (FIFODIR, S_IRWXG | S_IRWXO | S_IRWXU) != -1 || errno == EEXIST);
 
-    // creating default fifo
+    // creating fifo
     mkfifo (FIFONAME, 0666);
     int descrip = open (FIFONAME, O_RDWR | O_NONBLOCK);
     PERROR (descrip != -1);
-    LOG ("%s", "Opened default fifo\n");
+    LOG ("%s", "Opened fifo\n");
 
     // wait for pair process to open for reading
     sleep (5);
 
     // trying to write pathname to fifo
-    char filenameBuffer [PATH_MAX + 1];
+    char filenameBuffer [PATH_MAX];
     int pathLen = strlen (path);
     if (pathLen > PATH_MAX)
     {
         printf ("name too long\n");
         goto cleanup;
     }
-    memcpy (filenameBuffer, path, pathLen + 1);
+
+    memcpy (filenameBuffer, path, pathLen);
+    if (pathLen < PATH_MAX) 
+        filenameBuffer[pathLen] = '\0';
+
     // PERROR (fcntl (descrip, F_SETFD, O_RDWR| O_NONBLOCK) != -1);
     PERROR (write (descrip, filenameBuffer, PATH_MAX) != -1);
 
@@ -141,7 +144,7 @@ void printFile (const char *path)
 
 
 int writeProcess ()
-{   
+{
     // Opening fifo
     mkfifo (FIFONAME, 0666);
     int descrip = open (FIFONAME, O_RDONLY);
@@ -150,11 +153,12 @@ int writeProcess ()
     LOG ("Opened %s\n", FIFONAME);
 
     // Getting file name
-    char filename [PATH_MAX] = {1, 2, 3, 4};
+    char filename [PATH_MAX + 1] = {1, 2, 3, 4};
+    filename [PATH_MAX] = '\0';
     int bytesRead = read (descrip, filename, PATH_MAX);
     PERROR (bytesRead != -1);
     LOG ("Got filename %s(%X...)\n", filename, *(int*)filename);
-    
+
 
     close (descrip);
     unlink (FIFONAME);
