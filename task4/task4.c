@@ -19,6 +19,7 @@ if (!(action)) { perror (message); exitcode = -1; goto cleanup; }
 
 #define SIZE 4096
 const int UNDEFINED = 1;
+const int WAIT_INTERVAL_SEC = 15;
 
 uint8_t buffer [SIZE];
 
@@ -33,6 +34,12 @@ int perform (const char *path);
 void sigchld_handler (int sig, siginfo_t *info, void *ucontext)
 {
     childExitCode = info->si_status;
+}
+
+void sigalrm_handler_child (int sig)
+{
+    printf ("Waiting for a response from a parent process has timed out\n");
+    exit (-1);
 }
 
 
@@ -97,9 +104,14 @@ int childCode (const char *path)
     act.sa_handler = sigusr1_handler_child;
     sigaction (SIGUSR1, &act, NULL);
 
+    memset (&act, 0, sizeof (struct sigaction));
+    act.sa_handler = sigalrm_handler_child;
+    sigaction (SIGALRM, &act, NULL);
+
     sigset_t sigallow;
     sigfillset (&sigallow); //sigemptyset (&sigallow);
     sigdelset (&sigallow, SIGUSR1); //sigaddset (&sigallow, SIGUSR1);
+    sigdelset (&sigallow, SIGALRM);
 
     ASSERTED ((fd_src = open (path, O_RDONLY)) != -1, "Cannot open requested file")
 
@@ -118,13 +130,16 @@ int childCode (const char *path)
             {
                 kill (getppid (), buffer[i] & mask_ ? SIGUSR2 : SIGUSR1);
                 LOG ("Sent\n");
-                sigsuspend (&sigallow); // TODO: предусмотреть, если родитель сдох, м.б. alarm
+
+                alarm (WAIT_INTERVAL_SEC);
+                sigsuspend (&sigallow);
+                alarm (0);
                 LOG ("Sigsuspend returned\n");
+
                 if (mask_ == (1 << 7))  
                     break;
 
                 mask_ <<= 1;
-                // exit (-1);
             }
             
         }
@@ -195,6 +210,7 @@ int perform (const char *path)
 
 
         kill (pid, SIGUSR1);
+        printf ("Child no %d\n", pid);
     }
 
 }
