@@ -105,7 +105,7 @@ int openProcess (const char *path)
     char fifoname [FIFONAME_LEN + 1] = FIFONAME_SAMPLE;
 
     // creating directory for fifo
-    ASSERTED (mkdir (FIFODIR, S_IRWXG | S_IRWXO | S_IRWXU) != -1 || errno == EEXIST, "Cannot create directory for fifo")
+    ASSERTED (mkdir (FIFODIR, 0777) != -1 || errno == EEXIST, "Cannot create directory for fifo")
     
 
     // making and opening default fifo
@@ -124,10 +124,13 @@ int openProcess (const char *path)
     LOG ("%s", "Wrote fifoN to default fifo\n")
 
     // opening unique fifo
-    ASSERTED ((fd_unique = open (fifoname, O_RDWR)) != -1, "Cannot open unique fifo");
+    ASSERTED ((fd_unique = open (fifoname, O_WRONLY)) != -1, "Cannot open unique fifo");
     LOG ("Created unique fifo no %d\n", fifoN);
 
-    // trying to write file to unique fifo
+    // desynchronize data transferring in order to prevent deadlock whether receiver terminates
+    fcntl (fd_unique, F_SETFD, O_NONBLOCK);
+
+    // opening requested file
     ASSERTED ((fd_src = open (path, O_RDONLY)) != -1, "Cannot open requested file")
 
     char buffer [PIPE_BUF];
@@ -139,7 +142,11 @@ int openProcess (const char *path)
         if (bytesRead == 0)
             break;
 
+        // write file to unique fifo
         ASSERTED (write (fd_unique, buffer, bytesRead) == bytesRead, "Error while writing to unique fifo")
+
+        // wait for a pair process to read file from fifo
+        sleep (1);
     }
 
     LOG ("Wrote %s to fifo no %d\n", path, fifoN)
@@ -147,8 +154,6 @@ int openProcess (const char *path)
 
     cleanup:
 
-        // wait for a pair process to read file from fifo
-        sleep (5);
         if (fd_default != -1) close (fd_default);
         if (fd_unique  != -1) close (fd_unique);
         if (fd_src     != -1) close (fd_src);
@@ -173,7 +178,7 @@ int writeProcess (pid_t pid)
     // creating default fifo
     ASSERTED (mkfifo (FIFONAME_SAMPLE, 0666) != -1  || errno == EEXIST, "Cannot make default fifo")
     LOG ("%s\n", "Made default fifo\n");
-    ASSERTED ((fd_default = open (FIFONAME_SAMPLE, O_RDWR)) != -1, "Cannot open default fifo")
+    ASSERTED ((fd_default = open (FIFONAME_SAMPLE, O_RDONLY)) != -1, "Cannot open default fifo")
     LOG ("%s\n", "Opened default fifo\n");
 
     // getting unique fifo number
@@ -186,6 +191,7 @@ int writeProcess (pid_t pid)
         exitcode = -1;
         goto cleanup;
     }
+    LOG ("Got fifoN=%d", fifoN)
 
     // generating unique fifo name
     setFifoName (fifoname, fifoN);
