@@ -17,7 +17,7 @@
 if (!(action)) { perror (message); exitcode = -1; goto cleanup; }
 
 
-#define SIZE 4096
+#define SIZE 1
 const int UNDEFINED = 1;
 const int WAIT_INTERVAL_SEC = 15;
 
@@ -158,6 +158,7 @@ void flushBuffer ()
     write (1, buffer, pos);
     pos = 0;
     mask = 1;
+    memset (buffer, 0, SIZE);
 }
 
 int perform (const char *path)
@@ -210,7 +211,6 @@ int perform (const char *path)
 
 
         kill (pid, SIGUSR1);
-        printf ("Child no %d\n", pid);
     }
 
 }
