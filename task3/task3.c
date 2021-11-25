@@ -9,8 +9,10 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <signal.h>
 
-// \ISSUE процесс приаттачивается к shmem & семафорам и умирает -> Парный процесс висит в тупике
+// \ISSUE повисание семафоров, которые не были удалены через semctl
+//        решение - если с ними ничего не делали более RESPONSE_WAIT_TIME секунд, вероятно, их можно уничтожить
 
 
 #ifdef ENABLE_LOGGING
@@ -23,6 +25,7 @@
 #define ASSERTED(action, message) if (!(action)) { fprintf (stderr, "%d: ", getpid ()); perror (message); exitcode = -1; goto cleanup; }
 
 
+#define RESPONSE_WAIT_TIME 10
 #define SHMSIZE 4096
 #define SHMBUFSIZE (SHMSIZE - 2 * sizeof(short) - sizeof (int))
 const char *KEYPATH = "/tmp/igh8734yg8hius87fiuhqf78yg348yg7uvihefviuhoh97ghoruehpiuvfsho8qrhe7fvhvourhv9";
@@ -49,6 +52,8 @@ struct SharedSegment
 
 int P (int semid, int sem_num, int sem_flg);
 int V (int semid, int sem_num, int sem_flg);
+
+void sigalrm_handler (int sig);
 
 int sendProcess (const char *path, pid_t pid);
 int receiveProcess (pid_t pid);
@@ -323,6 +328,10 @@ int sendProcess (const char *path, pid_t pid)
 
     ASSERTED ((fd_src = open (path, O_RDONLY)) != -1, "Cannot open requested file")
 
+    struct sigaction act = { };
+    act.sa_handler = sigalrm_handler;
+    sigaction (SIGALRM, &act, NULL);
+
     int bytesRead;
     struct sembuf oper[3];
 
@@ -355,7 +364,9 @@ int sendProcess (const char *path, pid_t pid)
             oper[2].sem_num = (enum Semaphore) NEED_READ;
             oper[2].sem_flg = 0;
         
+            alarm (RESPONSE_WAIT_TIME);
             semop (semid, oper, 3);
+            alarm (0);
         }
         printSemaphoreValues (semid);
 
@@ -412,6 +423,12 @@ int receiveProcess (pid_t pid)
     struct SharedSegment *shmem;
     ASSERTED ((shmem = shmat (shmid, NULL, 0)) != NULL, "Can\'t attach shared memory segment");
 
+    struct sigaction act = { };
+    act.sa_handler = sigalrm_handler;
+    sigaction (SIGALRM, &act, NULL);
+    
+    struct sembuf oper[3];
+
     #define CRIT_SECTION_EXIT                        \
     oper[0].sem_op  = +1;                            \
     oper[0].sem_num = (enum Semaphore) NEED_READ;    \
@@ -423,8 +440,6 @@ int receiveProcess (pid_t pid)
     oper[2].sem_num = (enum Semaphore) NEED_WRITE;   \
     oper[2].sem_flg = 0;                             \
     semop (semid, oper, 3);
-
-    struct sembuf oper[3];
 
     while (1)
     {
@@ -440,8 +455,9 @@ int receiveProcess (pid_t pid)
             oper[2].sem_op  = -1;
             oper[2].sem_num = (enum Semaphore) NEED_WRITE;
             oper[2].sem_flg = 0;
-        
+            alarm (RESPONSE_WAIT_TIME);
             semop (semid, oper, 3);
+            alarm (0);
         }
         
         printSemaphoreValues (semid);
@@ -481,6 +497,12 @@ int receiveProcess (pid_t pid)
         if (semid != -1) semctl (semid, 0, IPC_RMID);
 
     return exitcode;
+}
+
+void sigalrm_handler (int sig)
+{
+    fprintf (stderr, "Waiting for a response from a pair process has timed out\n");
+    exit (-1);
 }
 
 
