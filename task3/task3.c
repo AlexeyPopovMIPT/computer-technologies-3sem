@@ -1,18 +1,16 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <errno.h>
-#include <assert.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <signal.h>
-
-// \ISSUE повисание семафоров, которые не были удалены через semctl
-//        решение - если с ними ничего не делали более RESPONSE_WAIT_TIME секунд, вероятно, их можно уничтожить
+#include <assert.h>
+#include <stdlib.h> // for exit ()
+#include <string.h> // for strcmp ()
+#include <time.h> // for time ()
 
 
 #ifdef ENABLE_LOGGING
@@ -69,7 +67,7 @@ int stressTest (const char *path);
 int main (int argc, const char **argv)
 {
     if (sizeof (struct SharedSegment) != SHMSIZE)
-        abort ();
+        exit (-1);
     
     if (argc == 1)
     {
@@ -154,7 +152,7 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     int needUndoForSemGetIpc = -1;
     if ((semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
     {
-        // Семафоры уже созданы
+        // Семафоры уже были созданы
 
         if (errno != EEXIST)
         {
@@ -235,6 +233,9 @@ int getIpc (int *shmid, int *semid, int iAmSender)
             continue;
         }
 
+        struct semid_ds sem_info = { };
+        semctl (*semid, 0, IPC_STAT, &sem_info);
+
 
         // Проверить, требуется ли sender/receiver
 
@@ -272,13 +273,27 @@ int getIpc (int *shmid, int *semid, int iAmSender)
 
         else
         {
+            // Возможно, sender и receiver, занимавшие эти семафоры & shared memory, некорректно
+            // завершились и не удалили семафоры
+            
+            if (time (NULL) - sem_info.sem_otime > RESPONSE_WAIT_TIME)
+            {
+                // Действительно так, значит, эти семафоры & shared memory по сути незанятые, и
+                // их нужно обработать как uncreated
+                shmctl (*shmid, IPC_RMID, 0);
+                semctl (*semid, 0, IPC_RMID);
+                *shmid = -1;
+                *semid = -1;
+                i--;
+                continue;
+            }
             printSemaphoreValues (*semid);
+            
+            LOG ("i=%d, SKIP Resource already busy\n", i)
             V (*semid, META, SEM_UNDO);
 
             *semid = -1;
             *shmid = -1;
-
-            LOG ("i=%d, SKIP Resource already busy\n", i)
 
             continue;
         }
@@ -350,7 +365,6 @@ int sendProcess (const char *path, pid_t pid)
 
     while (1)
     {
-        if (pid == 0) exit (-1);
         printSemaphoreValues (semid);
         // P (semid, NEED_WRITE, SEM_UNDO);
         {
