@@ -155,15 +155,12 @@ int getIpc (int *shmid, int *semid, int iAmSender)
             {
                 if (errno != EEXIST)
                 {
-                    perror ("SKIP Cannot get semaphores");
                     /* Не повезло */
                     continue;
                 }
 
                 // созданы
-                // TODO:
-                // возможно, они не были корректно удалены
-                // проверить, не слишком ли давно был последний
+
             }
 
             else
@@ -173,8 +170,6 @@ int getIpc (int *shmid, int *semid, int iAmSender)
                 uncreatedIndex = i;
                 semctl (*semid, 0, IPC_RMID);
                 *semid = -1;
-
-                LOG ("Set uncreatedIndex = %d\n", i);
 
                 continue;
             }
@@ -215,7 +210,6 @@ int getIpc (int *shmid, int *semid, int iAmSender)
             if (iAmSender) shmem->senderSelected = 1;
             else         shmem->receiverSelected = 1;
 
-            printSemaphoreValues (*semid);
             V (*semid, META, SEM_UNDO);
 
             goto cleanup;
@@ -281,7 +275,7 @@ int getIpc (int *shmid, int *semid, int iAmSender)
 
 int sendProcess (const char *path, pid_t pid)
 {
-    int exitcode = 0, shmid = -1, semid = -1, fd_src = -1;
+    int exitcode = 0, shmid = -1, semid = -1, fd_src = -1, semGetIpc = -1;
 
     ASSERTED (getIpc (&shmid, &semid, 1) == 0, "Cannot get ipc for межпроцессное вз-е");
 
@@ -362,8 +356,11 @@ int sendProcess (const char *path, pid_t pid)
 
     cleanup:
 
+        semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666);
+        P (semGetIpc, 0, SEM_UNDO);
         if (shmid != -1)  shmctl (shmid, IPC_RMID, NULL);
         if (semid != -1)  semctl (semid, 0, IPC_RMID);
+        V (semGetIpc, 0, SEM_UNDO);
         if (fd_src != -1) close (fd_src);
 
     return exitcode;
@@ -371,7 +368,7 @@ int sendProcess (const char *path, pid_t pid)
 
 int receiveProcess (pid_t pid)
 {
-    int exitcode = 0, shmid = -1, semid = -1;
+    int exitcode = 0, shmid = -1, semid = -1, semGetIpc = -1;
 
     ASSERTED (getIpc (&shmid, &semid, 0) == 0, "Cannot get ipc for межпроцессное вз-е");
 
@@ -440,8 +437,12 @@ int receiveProcess (pid_t pid)
     #undef CRIT_SECTION_EXIT
 
     cleanup:
-        if (shmid != -1) shmctl (shmid, IPC_RMID, NULL);
-        if (semid != -1) semctl (semid, 0, IPC_RMID);
+
+        semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666);
+        P (semGetIpc, 0, SEM_UNDO);
+        if (shmid != -1)  shmctl (shmid, IPC_RMID, NULL);
+        if (semid != -1)  semctl (semid, 0, IPC_RMID);
+        V (semGetIpc, 0, SEM_UNDO);
 
     return exitcode;
 }

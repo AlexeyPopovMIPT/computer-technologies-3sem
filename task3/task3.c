@@ -203,10 +203,6 @@ int getIpc (int *shmid, int *semid, int iAmSender)
                     continue;
                 }
 
-                // созданы
-                // TODO:
-                // возможно, они не были корректно удалены
-                // проверить, не слишком ли давно был последний
             }
 
             else
@@ -243,14 +239,11 @@ int getIpc (int *shmid, int *semid, int iAmSender)
         if (*shmid == -1)
         {
             /* Перестала существовать shared memory - вероятно, sender и receiver оба были,
-             * но завершились. Не повезло
-             * Ищем другое i
+             * но завершились. Вообще такого быть не должно
              */
             *semid = -1;
-            LOG ("i=%d, SKIP Shared memory disappeared: ", i)
-            #ifdef ENABLE_LOGGING
+            fprintf (stderr, "Unexpected error while getting shared memory: ");
             perror ("");
-            #endif
             continue;
         }
 
@@ -419,9 +412,13 @@ int sendProcess (const char *path, pid_t pid)
     #undef CRIT_SECTION_EXIT
 
     cleanup:
+
         LOG ("%s", "Cleaning up\n")
+        int semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666);
+        P (semGetIpc, 0, SEM_UNDO);
         if (shmid != -1)  shmctl (shmid, IPC_RMID, NULL);
         if (semid != -1)  semctl (semid, 0, IPC_RMID);
+        V (semGetIpc, 0, SEM_UNDO);
         if (fd_src != -1) close (fd_src);
 
     return exitcode;
@@ -507,8 +504,11 @@ int receiveProcess (pid_t pid)
 
     cleanup:
         LOG ("%s\n", "Cleaning up")
+        int semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666);
+        P (semGetIpc, 0, SEM_UNDO);
         if (shmid != -1) shmctl (shmid, IPC_RMID, NULL);
         if (semid != -1) semctl (semid, 0, IPC_RMID);
+        V (semGetIpc, 0, SEM_UNDO);
 
     return exitcode;
 }
