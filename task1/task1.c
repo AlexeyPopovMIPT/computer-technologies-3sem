@@ -17,7 +17,7 @@
 #define PREFIX_LEN 9
 
 
-#if defined (ENABLE_LOGGING)
+#ifdef ENABLE_LOGGING
 #define LOG(v1, ...) { fprintf (stderr, "%d: ", getpid ()); fprintf (stderr, v1, __VA_ARGS__); }
 #else
 #define LOG(...) ;
@@ -26,11 +26,11 @@
 #define ASSERTED(action, message) \
 if (!(action)) { perror (message); exitcode = -1; goto cleanup; }
 
-int openProcess (const char *path);
-int writeProcess (pid_t pid);
+int sendProcess (const char *path);
+int receiveProcess (pid_t pid);
 #if 1
-int openProcesses (const char *path1, const char *path2);
-int writeProcesses (void);
+int sendProcesses (const char *path1, const char *path2);
+int receiveProcesses (void);
 #endif
 
 
@@ -44,17 +44,17 @@ int main (int argc, const char **argv)
     }
 
     if (strcmp (argv[1], "-open") == 0)
-        return openProcess (argv[2]);
+        return sendProcess (argv[2]);
     #if 1
     else if (strcmp (argv[1], "-open2") == 0)
-        return openProcesses (argv[2], argv[3]);
+        return sendProcesses (argv[2], argv[3]);
     
     else if (strcmp (argv[1], "-write2") == 0)
-        return writeProcesses ();
+        return receiveProcesses ();
     #endif
 
     else if (strcmp (argv[1], "-write") == 0)
-        return writeProcess (getpid());
+        return receiveProcess (getpid());
 
     else
     {
@@ -84,20 +84,11 @@ int createNamedFifo (char *fifoname)
 
         if (mkfifo (fifoname, 0666) != -1)
             return num;
-        /*int errcode = mkfifo (fifoname, 0666);
-        if (errcode == -1)
-        {
-            if (errno != EEXIST)
-                return -1;
-
-        }
-        else
-            return num;*/
 
     }
 }
 
-int openProcess (const char *path)
+int sendProcess (const char *path)
 {
     LOG ("%s", "Process started for reading\n");
 
@@ -106,7 +97,7 @@ int openProcess (const char *path)
 
     // creating directory for fifo
     ASSERTED (mkdir (FIFODIR, 0777) != -1 || errno == EEXIST, "Cannot create directory for fifo")
-    
+
 
     // making and opening default fifo
     ASSERTED (mkfifo (FIFONAME_SAMPLE, 0666) != -1 || errno == EEXIST, "Cannot make default fifo")
@@ -149,7 +140,7 @@ int openProcess (const char *path)
         sleep (1);
     }
 
-    LOG ("Wrote %s to fifo no %d\n", path, fifoN)
+    LOG ("Wrote file %s to fifo no %d\n", path, fifoN)
 
 
     cleanup:
@@ -165,11 +156,10 @@ int openProcess (const char *path)
 }
 
 
-int writeProcess (pid_t pid)
+int receiveProcess (pid_t pid)
 {
     int exitcode = 0, fd_default = -1, fd_unique = -1;
     char fifoname [FIFONAME_LEN + 1] = FIFONAME_SAMPLE;
-    // Opening fifo
 
     // creating directory for fifo
     ASSERTED (mkdir (FIFODIR, 0777) != -1 || errno == EEXIST, "Cannot create directory for fifo")
@@ -187,7 +177,7 @@ int writeProcess (pid_t pid)
     ASSERTED (readCnt != -1, "Cannot read unique fifo number")
     if (readCnt != sizeof (fifoN))
     {
-        fprintf (stderr, "Error: %zu bytes from fifo estimated, got %d. fifoN is %X\n", sizeof (fifoN), readCnt, fifoN);
+        fprintf (stderr, "Error: %zu bytes from fifo estimated, got %d. fifoN is 0x%X\n", sizeof (fifoN), readCnt, fifoN);
         exitcode = -1;
         goto cleanup;
     }
@@ -226,20 +216,20 @@ int writeProcess (pid_t pid)
 }
 
 #if 1
-int openProcesses (const char *path1, const char *path2)
+int sendProcesses (const char *path1, const char *path2)
 {
     LOG ("%s", "Parent\n");
     pid_t pid = fork ();
-    openProcess (pid ? path1 : path2);
+    sendProcess (pid ? path1 : path2);
     if (pid > 0) waitpid (pid, 0, 0);
     return 0;
 }
 
-int writeProcesses ()
+int receiveProcesses ()
 {
     LOG ("%s", "Parent\n");
     pid_t pid = fork ();
-    writeProcess (pid);
+    receiveProcess (pid);
     if (pid > 0) waitpid (pid, 0, 0);
     return 0;
 }
