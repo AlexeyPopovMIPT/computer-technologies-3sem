@@ -17,7 +17,7 @@
 if (!(action)) { perror (message); exitcode = -1; goto cleanup; }
 
 
-#define SIZE 1
+#define SIZE 4096
 const int UNDEFINED = 1;
 const int WAIT_INTERVAL_SEC = 15;
 
@@ -73,7 +73,7 @@ void sigusr2_handler (int sig)
 }
 
 
-void sigusr1_handler_child (int sig) 
+void sigusr1_handler_child (int sig)
 {}
 
 
@@ -99,7 +99,7 @@ int childCode (const char *path)
     sigset_t set, old_set;
     sigfillset (&set);
     sigprocmask (SIG_BLOCK, &set, &old_set);
-    
+
     struct sigaction act = { };
     act.sa_handler = sigusr1_handler_child;
     sigaction (SIGUSR1, &act, NULL);
@@ -109,8 +109,8 @@ int childCode (const char *path)
     sigaction (SIGALRM, &act, NULL);
 
     sigset_t sigallow;
-    sigfillset (&sigallow); //sigemptyset (&sigallow);
-    sigdelset (&sigallow, SIGUSR1); //sigaddset (&sigallow, SIGUSR1);
+    sigfillset (&sigallow);
+    sigdelset (&sigallow, SIGUSR1);
     sigdelset (&sigallow, SIGALRM);
 
     ASSERTED ((fd_src = open (path, O_RDONLY)) != -1, "Cannot open requested file")
@@ -136,12 +136,12 @@ int childCode (const char *path)
                 alarm (0);
                 LOG ("Sigsuspend returned\n");
 
-                if (mask_ == (1 << 7))  
+                if (mask_ == (1 << 7))
                     break;
 
                 mask_ <<= 1;
             }
-            
+
         }
     }
 
@@ -152,7 +152,7 @@ int childCode (const char *path)
 
 }
 
-// Parent code
+
 void flushBuffer ()
 {
     write (1, buffer, pos);
@@ -182,13 +182,13 @@ int perform (const char *path)
     sigprocmask (SIG_BLOCK, &set, &old_set);
 
     sigset_t sigallow;
-    sigfillset (&sigallow); //sigemptyset (&sigallow);
-    sigdelset (&sigallow, SIGUSR1); //sigaddset (&sigallow, SIGUSR1);
-    sigdelset (&sigallow, SIGUSR2); //sigaddset (&sigallow, SIGUSR2);
-    sigdelset (&sigallow, SIGCHLD); //sigaddset (&sigallow, SIGCHLD);
+    sigfillset (&sigallow);
+    sigdelset (&sigallow, SIGUSR1);
+    sigdelset (&sigallow, SIGUSR2);
+    sigdelset (&sigallow, SIGCHLD);
 
     pid_t pid = fork ();
-    if (pid == 0) 
+    if (pid == 0)
         return childCode (path);
 
 
