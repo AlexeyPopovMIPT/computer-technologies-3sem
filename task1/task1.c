@@ -28,7 +28,7 @@ if (!(action)) { perror (message); exitcode = -1; goto cleanup; }
 
 int sendProcess (const char *path);
 int receiveProcess (pid_t pid);
-#if 1
+#if 0
 int sendProcesses (const char *path1, const char *path2);
 int receiveProcesses (void);
 #endif
@@ -45,7 +45,7 @@ int main (int argc, const char **argv)
 
     if (strcmp (argv[1], "-open") == 0)
         return sendProcess (argv[2]);
-    #if 1
+    #if 0
     else if (strcmp (argv[1], "-open2") == 0)
         return sendProcesses (argv[2], argv[3]);
     
@@ -215,7 +215,7 @@ int receiveProcess (pid_t pid)
 
 }
 
-#if 1
+#if 0
 int sendProcesses (const char *path1, const char *path2)
 {
     LOG ("%s", "Parent\n");
