@@ -82,7 +82,7 @@ int main (int argc, const char **argv)
         usage (argc, argv);
         return 0;
     }
-    
+
     int queueId = msgget (IPC_PRIVATE, IPC_CREAT | 0666);
     if (queueId < 0)
     {
