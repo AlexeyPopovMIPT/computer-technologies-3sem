@@ -119,7 +119,8 @@ int childCode (const char *path)
 
     while (1)
     {
-        ASSERTED ((bytesRead = read (fd_src, buffer, SIZE)) != -1, "Error while reading from file")
+        ASSERTED ((bytesRead = read (fd_src, buffer, SIZE)) != -1, 
+                  "Error while reading from file")
         if (bytesRead == 0)
             break;
 
@@ -200,7 +201,8 @@ int perform (const char *path)
         {
             flushBuffer ();
             if (childExitCode != 0)
-                printf ("Child encountered an error %d, file wasn\'t passed successfully\n", childExitCode);
+                printf ("Child encountered an error %d, "
+                "file wasn\'t passed successfully\n", childExitCode);
             return childExitCode;
         }
 
@@ -214,3 +216,4 @@ int perform (const char *path)
     }
 
 }
+
