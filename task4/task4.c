@@ -86,7 +86,11 @@ void usage (const char *pathForCaller)
 
 int main (int argc, const char **argv)
 {
-    if (argc != 2) usage (argv[0]);
+    if (argc != 2) 
+    {
+        usage (argv[0]);
+        return 0;
+    }
 
     return perform (argv[1]);
 }
@@ -189,6 +193,7 @@ int perform (const char *path)
     sigdelset (&sigallow, SIGCHLD);
 
     pid_t pid = fork ();
+
     if (pid == 0)
         return childCode (path);
 
