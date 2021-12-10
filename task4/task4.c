@@ -85,7 +85,6 @@ void usage (const char *pathForCaller)
     printf ("Usage: %s [path]\n", pathForCaller);
 }
 
-
 int main (int argc, const char **argv)
 {
     if (argc != 2) 
@@ -186,6 +185,7 @@ int perform (const char *path)
     // block handling of signals
     sigset_t set, old_set;
     sigfillset (&set);
+    sigprocmask (SIG_BLOCK, &set, &old_set);
 
     sigset_t sigallow;
     sigfillset (&sigallow);
@@ -195,7 +195,7 @@ int perform (const char *path)
 
     pid_t pid = fork ();
 
-    sigprocmask (SIG_BLOCK, &set, &old_set);
+    //sigprocmask (SIG_BLOCK, &set, &old_set);
 
     if (pid == 0)
         return childCode (path);
@@ -226,3 +226,7 @@ int perform (const char *path)
 
 }
 
+/*
+обработчики - за исполнение (сигнал может прийти и отобрать исполнение у другого обработчика)
+родитель с ребёнком - за маску сигналов родителя
+*/
