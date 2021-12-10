@@ -116,60 +116,24 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     //////////
     // 1. Получаем mutex для взаимоисключения на время выполнения этой функции
 
-    int semGetIpc;
-    if ((semGetIpc = semget (ftok (KEYPATH, 0), 2, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
+    int semGetIpc = semget (ftok (KEYPATH, 0), 2, 0666 | IPC_CREAT);
+
+    if (semGetIpc == -1)
     {
-        
-        // Семафоры уже были созданы
-
-        if (errno != EEXIST)
-        {
-            perror ("Error while getting mutex for getIpc sync");
-            return -1;
-        }
-
-        if ((semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666)) == -1)
-        {
-            perror ("Semaphores disappeared");
-            return -1;
-        }
-
-        if (isSemZero (semGetIpc, (enum Semaphore) CORRECT))
-        {
-            struct sembuf oper [3];
-            oper[0].sem_num = (enum Semaphore) MUTEX;
-            oper[0].sem_op = +1;
-            oper[0].sem_flg = 0;
-            oper[1].sem_num = (enum Semaphore) MUTEX;
-            oper[1].sem_op = -1;
-            oper[1].sem_flg = SEM_UNDO;
-            oper[2].sem_num = (enum Semaphore) CORRECT;
-            oper[2].sem_op = +1;
-            oper[2].sem_flg = 0;
-            semop (semGetIpc, oper, 3);
-        }
-
-        else
-        {
-            P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
-        }
-
-
+        perror ("Error while getting mutex for getIpc sync");
+        return -1;
     }
 
-    else
     {
-        struct sembuf oper [3];
+        struct sembuf oper [2];
         oper[0].sem_num = (enum Semaphore) MUTEX;
-        oper[0].sem_op = +1;
         oper[0].sem_flg = 0;
+        oper[0].sem_op = 0;
         oper[1].sem_num = (enum Semaphore) MUTEX;
-        oper[1].sem_op = -1;
         oper[1].sem_flg = SEM_UNDO;
-        oper[2].sem_num = (enum Semaphore) CORRECT;
-        oper[2].sem_op = +1;
-        oper[2].sem_flg = 0;
-        semop (semGetIpc, oper, 3);
+        oper[1].sem_op = 1;
+        semop (semGetIpc, oper, 2);
+        putchar (1);
     }
 
 
@@ -181,51 +145,35 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     key_t key;
     int uncreatedIndex = -1;
 
+
     for (int i = 1; i < 256; i++)
     {
         key = ftok (KEYPATH, i);
+        *semid = semget (key, 4, 0666 | IPC_CREAT);
 
-        if (uncreatedIndex == -1)
-        {
-            // Проверить, созданы ли семафоры & shared memory по этому ключу
-            if ((*semid = semget (key, 4, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
-            {
-                if (errno != EEXIST)
-                {
-                    
-                    perror ("SKIP Cannot get semaphores");
-                    //* Не повезло */
-                    continue;
-                }
-
-            }
-
-            else
-            {
-                // Действительно не созданы
-
-                uncreatedIndex = i;
-                semctl (*semid, 0, IPC_RMID);
-                *semid = -1;
-
-                continue;
-            }
-            
-        }
-
-        *semid = semget (key, 4, 0666);
-
+        // Проверить, созданы ли семафоры & shared memory по этому ключу
         if (*semid == -1)
         {
-            /* Не существуют, но создавать их не требуется */
+            perror ("SKIP Cannot get semaphores");
+            //* Не повезло */
+            continue;
+
+        }
+
+        else if (isSemZero (*semid, (enum Semaphore) CORRECT))
+        {
+            // Действительно не созданы
+
+            if (uncreatedIndex == -1) uncreatedIndex = i;
+            semctl (*semid, 0, IPC_RMID);
+            *semid = -1;
+
             continue;
         }
 
-        if (isSemZero (*semid, (enum Semaphore) CORRECT))
+        else
         {
-            /* Создавший семафоры процесс слишком быстро завершился, по факту ситуация эквивалентна той что выше */
-            semctl (*semid, 0, IPC_RMID);
-            continue;
+                // созданы
         }
 
         struct semid_ds sem_info = { };
@@ -325,7 +273,7 @@ int getIpc (int *shmid, int *semid, int iAmSender)
 
     cleanup:
     
-        V (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
+        P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
         return exitcode;
 
 }
@@ -413,10 +361,19 @@ int sendProcess (const char *path)
     cleanup:
 
         semGetIpc = semget (ftok (KEYPATH, 0), 2, 0666);
-        P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
+        {
+            struct sembuf oper [2];
+            oper[0].sem_num = (enum Semaphore) MUTEX;
+            oper[0].sem_flg = 0;
+            oper[0].sem_op = 0;
+            oper[1].sem_num = (enum Semaphore) MUTEX;
+            oper[1].sem_flg = SEM_UNDO;
+            oper[1].sem_op = 1;
+            semop (semGetIpc, oper, 2);
+        }
         if (shmid != -1)  shmctl (shmid, IPC_RMID, NULL);
         if (semid != -1)  semctl (semid, 0, IPC_RMID);
-        V (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
+        P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
         if (fd_src != -1) close (fd_src);
 
     return exitcode;
@@ -494,10 +451,20 @@ int receiveProcess ()
 
     cleanup:
     
+        semGetIpc = semget (ftok (KEYPATH, 0), 2, 0666);
+        {
+            struct sembuf oper [2];
+            oper[0].sem_num = (enum Semaphore) MUTEX;
+            oper[0].sem_flg = 0;
+            oper[0].sem_op = 0;
+            oper[1].sem_num = (enum Semaphore) MUTEX;
+            oper[1].sem_flg = SEM_UNDO;
+            oper[1].sem_op = 1;
+            semop (semGetIpc, oper, 2);
+        }
+        if (shmid != -1)  shmctl (shmid, IPC_RMID, NULL);
+        if (semid != -1)  semctl (semid, 0, IPC_RMID);
         P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
-        if (shmid != -1) shmctl (shmid, IPC_RMID, NULL);
-        if (semid != -1) semctl (semid, 0, IPC_RMID);
-        V (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
 
     return exitcode;
 }
@@ -507,4 +474,67 @@ void sigalrm_handler (int sig)
     fprintf (stderr, "Waiting for a response from a pair process has timed out\n");
     exit (-1);
 }
+
+
+
+
+
+
+
+// Don't pay attention to this please :)
+
+#if 0
+key = ftok (KEYPATH, i);
+
+        if (uncreatedIndex == -1)
+        {
+            // Проверить, созданы ли семафоры & shared memory по этому ключу
+            if ((*semid = semget (key, 4, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
+            {
+                if (errno != EEXIST)
+                {
+                    
+                    perror ("SKIP Cannot get semaphores");
+                    //* Не повезло */
+                    continue;
+                }
+
+            }
+
+            else
+            {
+                // Действительно не созданы
+
+                uncreatedIndex = i;
+                semctl (*semid, 0, IPC_RMID);
+                *semid = -1;
+
+                continue;
+            }
+
+            
+        }
+
+        *semid = semget (key, 4, 0666);
+
+        if (*semid == -1)
+        {
+            /* Не существуют, но создавать их не требуется */
+            continue;
+        }
+
+        if (isSemZero (*semid, (enum Semaphore) CORRECT))
+        {
+            /* Создавший семафоры процесс слишком быстро завершился, по факту ситуация эквивалентна той что выше */
+            semctl (*semid, 0, IPC_RMID);
+            continue;
+        }
+#endif
+
+/*
+1) сендеры и ресиверы за созданные семафоры & shared memory
+2) в каждой паре сендер и ресивер за поля
+3) где аларм
+
+*/
 
