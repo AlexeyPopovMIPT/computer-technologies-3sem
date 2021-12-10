@@ -31,7 +31,7 @@ enum Semaphore
 {
     CORRECT = 0,
     MUTEX = 1,
-    META = 1, /* mutual exclusion for SharedSegment::bytesCount and SharedSegment::buffer */
+    META = 1,
     NEED_WRITE = 2,
     NEED_READ = 3
 };
