@@ -29,16 +29,18 @@ int childExitCode = UNDEFINED;
 
 
 int perform (const char *path);
-
+void flushBuffer ();
 
 void sigchld_handler (int sig, siginfo_t *info, void *ucontext)
 {
+    // flushBuffer ();
+    // exit(1);
     childExitCode = info->si_status;
 }
 
 void sigalrm_handler_child (int sig)
 {
-    printf ("Waiting for a response from a parent process has timed out\n");
+    fprintf (stderr, "Waiting for a response from a parent process has timed out\n");
     exit (-1);
 }
 
@@ -184,7 +186,6 @@ int perform (const char *path)
     // block handling of signals
     sigset_t set, old_set;
     sigfillset (&set);
-    sigprocmask (SIG_BLOCK, &set, &old_set);
 
     sigset_t sigallow;
     sigfillset (&sigallow);
@@ -193,6 +194,8 @@ int perform (const char *path)
     sigdelset (&sigallow, SIGCHLD);
 
     pid_t pid = fork ();
+
+    sigprocmask (SIG_BLOCK, &set, &old_set);
 
     if (pid == 0)
         return childCode (path);
@@ -206,7 +209,7 @@ int perform (const char *path)
         {
             flushBuffer ();
             if (childExitCode != 0)
-                printf ("Child encountered an error %d, "
+                fprintf (stderr, "Child encountered an error %d, "
                 "file wasn\'t passed successfully\n", childExitCode);
             return childExitCode;
         }
@@ -218,6 +221,7 @@ int perform (const char *path)
 
 
         kill (pid, SIGUSR1);
+        
     }
 
 }
