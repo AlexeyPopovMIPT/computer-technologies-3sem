@@ -11,19 +11,20 @@
 #include <string.h> // for strcmp ()
 #include <time.h> // for time ()
 
-
-#define ASSERTED(action, message) if (!(action)) { perror (message); exitcode = -1; goto cleanup; }
+#define ASSERTED(action, message) if (!(action)) { fprintf (stderr, "%d: ", getpid ()); perror (message); exitcode = -1; goto cleanup; }
 
 
 #define RESPONSE_WAIT_TIME 10
 #define SHMSIZE 4096
 #define SHMBUFSIZE (SHMSIZE - 2 * sizeof(short) - sizeof (int))
 const char *KEYPATH = "/tmp/igh8734yg8hius87fiuhqf78yg348yg7uvihefviuhoh97ghoruehpiuvfsho8qrhe7fvhvourhv9";
-enum Semaphore
+enum Semaphore 
 {
-    META = 0, /* mutual exclusion for SharedSegment::bytesCount and SharedSegment::buffer */
-    NEED_WRITE = 1,
-    NEED_READ = 2
+    CORRECT = 0,
+    MUTEX = 1,
+    META = 1,
+    NEED_WRITE = 2,
+    NEED_READ = 3
 };
 enum Semop
 {
@@ -45,17 +46,16 @@ int V (int semid, int sem_num, int sem_flg);
 
 void sigalrm_handler (int sig);
 
-int sendProcess (const char *path, pid_t pid);
-int receiveProcess (pid_t pid);
-
+int sendProcess (const char *path);
+int receiveProcess ();
 
 
 /* -open for 1st process, -write for second */
 int main (int argc, const char **argv)
 {
     if (sizeof (struct SharedSegment) != SHMSIZE)
-        exit (-1);
-
+        abort ();
+    
     if (argc == 1)
     {
         printf ("Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
@@ -63,10 +63,10 @@ int main (int argc, const char **argv)
     }
 
     if (strcmp (argv[1], "-open") == 0)
-        return sendProcess (argv[2], getpid ());
+        return sendProcess (argv[2]);
 
     else if (strcmp (argv[1], "-write") == 0)
-        return receiveProcess (getpid());
+        return receiveProcess ();
 
     else
     {
@@ -74,6 +74,17 @@ int main (int argc, const char **argv)
         printf ("Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
         return 0;
     }
+}
+
+
+int isSemZero (int semid, int sem_num)
+{
+    struct sembuf oper = { };
+    oper.sem_flg = IPC_NOWAIT;
+    oper.sem_num = sem_num;
+    oper.sem_op = 0;
+
+    return semop (semid, &oper, 1) != -1;
 }
 
 
@@ -95,7 +106,6 @@ int V (int semid, int sem_num, int sem_flg)
     return semop (semid, &oper, 1);
 }
 
-
 int getIpc (int *shmid, int *semid, int iAmSender)
 {
     assert (iAmSender == 0 || iAmSender == 1);
@@ -107,9 +117,9 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     // 1. Получаем mutex для взаимоисключения на время выполнения этой функции
 
     int semGetIpc;
-    int needUndoForSemGetIpc = -1;
-    if ((semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
+    if ((semGetIpc = semget (ftok (KEYPATH, 0), 2, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
     {
+        
         // Семафоры уже были созданы
 
         if (errno != EEXIST)
@@ -124,15 +134,42 @@ int getIpc (int *shmid, int *semid, int iAmSender)
             return -1;
         }
 
-        // Нужно повиснуть на входе в к.с.
-        needUndoForSemGetIpc = 1;
-        P (semGetIpc, 0, SEM_UNDO);
+        if (isSemZero (semGetIpc, (enum Semaphore) CORRECT))
+        {
+            struct sembuf oper [3];
+            oper[0].sem_num = (enum Semaphore) MUTEX;
+            oper[0].sem_op = +1;
+            oper[0].sem_flg = 0;
+            oper[1].sem_num = (enum Semaphore) MUTEX;
+            oper[1].sem_op = -1;
+            oper[1].sem_flg = SEM_UNDO;
+            oper[2].sem_num = (enum Semaphore) CORRECT;
+            oper[2].sem_op = +1;
+            oper[2].sem_flg = 0;
+            semop (semGetIpc, oper, 3);
+        }
+
+        else
+        {
+            P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
+        }
+
 
     }
 
     else
     {
-        needUndoForSemGetIpc = 0;
+        struct sembuf oper [3];
+        oper[0].sem_num = (enum Semaphore) MUTEX;
+        oper[0].sem_op = +1;
+        oper[0].sem_flg = 0;
+        oper[1].sem_num = (enum Semaphore) MUTEX;
+        oper[1].sem_op = -1;
+        oper[1].sem_flg = SEM_UNDO;
+        oper[2].sem_num = (enum Semaphore) CORRECT;
+        oper[2].sem_op = +1;
+        oper[2].sem_flg = 0;
+        semop (semGetIpc, oper, 3);
     }
 
 
@@ -151,15 +188,15 @@ int getIpc (int *shmid, int *semid, int iAmSender)
         if (uncreatedIndex == -1)
         {
             // Проверить, созданы ли семафоры & shared memory по этому ключу
-            if ((*semid = semget (key, 3, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
+            if ((*semid = semget (key, 4, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
             {
                 if (errno != EEXIST)
                 {
-                    /* Не повезло */
+                    
+                    perror ("SKIP Cannot get semaphores");
+                    //* Не повезло */
                     continue;
                 }
-
-                // созданы
 
             }
 
@@ -173,14 +210,21 @@ int getIpc (int *shmid, int *semid, int iAmSender)
 
                 continue;
             }
-
+            
         }
 
-        *semid = semget (key, 3, 0666);
+        *semid = semget (key, 4, 0666);
 
         if (*semid == -1)
         {
-            /* Не существуют, но создавать их не требуется - uncreatedIndex уже заполнен */
+            /* Не существуют, но создавать их не требуется */
+            continue;
+        }
+
+        if (isSemZero (*semid, (enum Semaphore) CORRECT))
+        {
+            /* Создавший семафоры процесс слишком быстро завершился, по факту ситуация эквивалентна той что выше */
+            semctl (*semid, 0, IPC_RMID);
             continue;
         }
 
@@ -194,14 +238,15 @@ int getIpc (int *shmid, int *semid, int iAmSender)
         if (*shmid == -1)
         {
             /* Перестала существовать shared memory - вероятно, sender и receiver оба были,
-             * но завершились. Не повезло
-             * Ищем другое i
+             * но завершились. Вообще такого быть не должно
              */
             *semid = -1;
+            fprintf (stderr, "Unexpected error while getting shared memory: ");
+            perror (NULL);
             continue;
         }
 
-        P (*semid, META, SEM_UNDO);
+        P (*semid, (enum Semaphore) META, SEM_UNDO);
 
         struct SharedSegment *shmem = shmat (*shmid, NULL, 0);
 
@@ -210,7 +255,7 @@ int getIpc (int *shmid, int *semid, int iAmSender)
             if (iAmSender) shmem->senderSelected = 1;
             else         shmem->receiverSelected = 1;
 
-            V (*semid, META, SEM_UNDO);
+            V (*semid, (enum Semaphore) META, SEM_UNDO);
 
             goto cleanup;
         }
@@ -219,7 +264,7 @@ int getIpc (int *shmid, int *semid, int iAmSender)
         {
             // Возможно, sender и receiver, занимавшие эти семафоры & shared memory, некорректно
             // завершились и не удалили семафоры
-
+            
             if (time (NULL) - sem_info.sem_otime > RESPONSE_WAIT_TIME)
             {
                 // Действительно так, значит, эти семафоры & shared memory по сути незанятые, и
@@ -231,15 +276,15 @@ int getIpc (int *shmid, int *semid, int iAmSender)
                 i--;
                 continue;
             }
-
-            V (*semid, META, SEM_UNDO);
+        
+            V (*semid, (enum Semaphore) META, SEM_UNDO);
 
             *semid = -1;
             *shmid = -1;
 
             continue;
         }
-
+        
     }
 
     //////////
@@ -254,31 +299,43 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     }
 
     key = ftok (KEYPATH, uncreatedIndex);
-    *semid = semget (key, 3, 0666 | IPC_CREAT | IPC_EXCL);
+    *semid = semget (key, 4, 0666 | IPC_CREAT | IPC_EXCL);
     *shmid = shmget (key, SHMSIZE, 0666 | IPC_CREAT);
+
+    struct sembuf oper [3];
+    oper[0].sem_flg = 0;
+    oper[0].sem_num = (enum Semaphore) CORRECT;
+    oper[0].sem_op = +1;
+    oper[1].sem_flg = 0;
+    oper[1].sem_num = (enum Semaphore) META;
+    oper[1].sem_op = +1;
+    oper[2].sem_flg = SEM_UNDO;
+    oper[2].sem_num = (enum Semaphore) META;
+    oper[2].sem_op = -1;
+    semop (*semid, oper, 3);
 
     struct SharedSegment *shmem = shmat (*shmid, NULL, 0);
     shmem->senderSelected = iAmSender;
     shmem->receiverSelected = !iAmSender;
     shmem->bytesCount = 0;
 
-    V (*semid, NEED_WRITE, 0);
-    V (*semid, META, 0);
+
+    V (*semid, (enum Semaphore) NEED_WRITE, 0);
+    V (*semid, (enum Semaphore) META, 0);
 
     cleanup:
-
-        assert (needUndoForSemGetIpc != -1);
-        V (semGetIpc, 0, needUndoForSemGetIpc ? SEM_UNDO : 0);
+    
+        V (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
         return exitcode;
 
 }
 
-int sendProcess (const char *path, pid_t pid)
+int sendProcess (const char *path)
 {
     int exitcode = 0, shmid = -1, semid = -1, fd_src = -1, semGetIpc = -1;
-
+    
     ASSERTED (getIpc (&shmid, &semid, 1) == 0, "Cannot get ipc for межпроцессное вз-е");
-
+    
 
     struct SharedSegment *shmem;
     ASSERTED ((shmem = shmat (shmid, NULL, 0)) != NULL, "Cannot attach shared memory segment");
@@ -294,13 +351,13 @@ int sendProcess (const char *path, pid_t pid)
 
     #define CRIT_SECTION_EXIT                        \
     oper[0].sem_op  = +1;                            \
-    oper[0].sem_num = (enum Semaphore) NEED_WRITE;   \
-    oper[0].sem_flg = 0;                             \
-    oper[1].sem_op  = -1;                            \
+    oper[0].sem_num = (enum Semaphore) NEED_READ;    \
+    oper[0].sem_flg = SEM_UNDO;                      \
+    oper[1].sem_op  = +1;                            \
     oper[1].sem_num = (enum Semaphore) NEED_WRITE;   \
     oper[1].sem_flg = SEM_UNDO;                      \
-    oper[2].sem_op  = (enum Semop) EXIT; /*+1*/      \
-    oper[2].sem_num = (enum Semaphore) NEED_READ;    \
+    oper[2].sem_op  = -1;                            \
+    oper[2].sem_num = (enum Semaphore) NEED_WRITE;   \
     oper[2].sem_flg = 0;                             \
     semop (semid, oper, 3);
 
@@ -308,21 +365,20 @@ int sendProcess (const char *path, pid_t pid)
     while (1)
     {
         {
-            oper[0].sem_op  = (enum Semop) ENTRY; /*-1*/
+            oper[0].sem_op  = -1;
             oper[0].sem_num = (enum Semaphore) NEED_WRITE;
-            oper[0].sem_flg = 0;
+            oper[0].sem_flg = SEM_UNDO;
             oper[1].sem_op  = +1;
             oper[1].sem_num = (enum Semaphore) NEED_READ;
-            oper[1].sem_flg = SEM_UNDO;
+            oper[1].sem_flg = 0;
             oper[2].sem_op  = -1;
             oper[2].sem_num = (enum Semaphore) NEED_READ;
-            oper[2].sem_flg = 0;
-
+            oper[2].sem_flg = SEM_UNDO;
+        
             alarm (RESPONSE_WAIT_TIME);
             semop (semid, oper, 3);
             alarm (0);
         }
-
 
         if (shmem->bytesCount != 0)
         {
@@ -356,22 +412,22 @@ int sendProcess (const char *path, pid_t pid)
 
     cleanup:
 
-        semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666);
-        P (semGetIpc, 0, SEM_UNDO);
+        semGetIpc = semget (ftok (KEYPATH, 0), 2, 0666);
+        P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
         if (shmid != -1)  shmctl (shmid, IPC_RMID, NULL);
         if (semid != -1)  semctl (semid, 0, IPC_RMID);
-        V (semGetIpc, 0, SEM_UNDO);
+        V (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
         if (fd_src != -1) close (fd_src);
 
     return exitcode;
 }
 
-int receiveProcess (pid_t pid)
+int receiveProcess ()
 {
     int exitcode = 0, shmid = -1, semid = -1, semGetIpc = -1;
 
     ASSERTED (getIpc (&shmid, &semid, 0) == 0, "Cannot get ipc for межпроцессное вз-е");
-
+    
 
     struct SharedSegment *shmem;
     ASSERTED ((shmem = shmat (shmid, NULL, 0)) != NULL, "Can\'t attach shared memory segment");
@@ -379,38 +435,38 @@ int receiveProcess (pid_t pid)
     struct sigaction act = { };
     act.sa_handler = sigalrm_handler;
     sigaction (SIGALRM, &act, NULL);
-
+    
     struct sembuf oper[3];
 
     #define CRIT_SECTION_EXIT                        \
     oper[0].sem_op  = +1;                            \
-    oper[0].sem_num = (enum Semaphore) NEED_READ;    \
-    oper[0].sem_flg = 0;                             \
-    oper[1].sem_op  = -1;                            \
+    oper[0].sem_num = (enum Semaphore) NEED_WRITE;   \
+    oper[0].sem_flg = SEM_UNDO;                      \
+    oper[1].sem_op  = +1;                            \
     oper[1].sem_num = (enum Semaphore) NEED_READ;    \
     oper[1].sem_flg = SEM_UNDO;                      \
-    oper[2].sem_op  = (enum Semop) EXIT; /*+1*/      \
-    oper[2].sem_num = (enum Semaphore) NEED_WRITE;   \
+    oper[2].sem_op  = -1;                            \
+    oper[2].sem_num = (enum Semaphore) NEED_READ;    \
     oper[2].sem_flg = 0;                             \
     semop (semid, oper, 3);
 
     while (1)
     {
         {
-            oper[0].sem_op  = (enum Semop) ENTRY; /*-1*/
+            oper[0].sem_op  = -1;
             oper[0].sem_num = (enum Semaphore) NEED_READ;
-            oper[0].sem_flg = 0;
+            oper[0].sem_flg = SEM_UNDO;
             oper[1].sem_op  = +1;
             oper[1].sem_num = (enum Semaphore) NEED_WRITE;
-            oper[1].sem_flg = SEM_UNDO;
+            oper[1].sem_flg = 0;
             oper[2].sem_op  = -1;
             oper[2].sem_num = (enum Semaphore) NEED_WRITE;
-            oper[2].sem_flg = 0;
+            oper[2].sem_flg = SEM_UNDO;
+
             alarm (RESPONSE_WAIT_TIME);
             semop (semid, oper, 3);
             alarm (0);
         }
-
 
         if (shmem->bytesCount == 0)
         {
@@ -437,12 +493,11 @@ int receiveProcess (pid_t pid)
     #undef CRIT_SECTION_EXIT
 
     cleanup:
-
-        semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666);
-        P (semGetIpc, 0, SEM_UNDO);
-        if (shmid != -1)  shmctl (shmid, IPC_RMID, NULL);
-        if (semid != -1)  semctl (semid, 0, IPC_RMID);
-        V (semGetIpc, 0, SEM_UNDO);
+    
+        P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
+        if (shmid != -1) shmctl (shmid, IPC_RMID, NULL);
+        if (semid != -1) semctl (semid, 0, IPC_RMID);
+        V (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
 
     return exitcode;
 }
