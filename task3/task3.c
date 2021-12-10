@@ -57,7 +57,7 @@ void sigalrm_handler (int sig);
 
 int sendProcess (const char *path);
 int receiveProcess ();
-#if 0
+#if 1
 int sendProcesses (const char *path1, const char *path2);
 int receiveProcesses (void);
 int stressTest (const char *path);
@@ -79,7 +79,7 @@ int main (int argc, const char **argv)
 
     if (strcmp (argv[1], "-open") == 0)
         return sendProcess (argv[2]);
-    #if 0
+    #if 1
     else if (strcmp (argv[1], "-open2") == 0)
         return sendProcesses (argv[2], argv[3]);
     
@@ -161,7 +161,6 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     // 1. Получаем mutex для взаимоисключения на время выполнения этой функции
 
     int semGetIpc;
-    int needUndoForSemGetIpc = -1;
     if ((semGetIpc = semget (ftok (KEYPATH, 0), 2, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
     {
         
@@ -179,23 +178,42 @@ int getIpc (int *shmid, int *semid, int iAmSender)
             return -1;
         }
 
-        // Нужно повиснуть на входе в к.с.
-        needUndoForSemGetIpc = 1;
-        // проверить второй семафор
         if (isSemZero (semGetIpc, (enum Semaphore) CORRECT))
         {
-            semctl (semGetIpc, 0, IPC_RMID);
-            fprintf (stderr, "Error, please try again\n");
-            return -1;
+            struct sembuf oper [3];
+            oper[0].sem_num = (enum Semaphore) MUTEX;
+            oper[0].sem_op = +1;
+            oper[0].sem_flg = 0;
+            oper[1].sem_num = (enum Semaphore) MUTEX;
+            oper[1].sem_op = -1;
+            oper[1].sem_flg = SEM_UNDO;
+            oper[2].sem_num = (enum Semaphore) CORRECT;
+            oper[2].sem_op = +1;
+            oper[2].sem_flg = 0;
+            semop (semGetIpc, oper, 3);
         }
-        P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
+
+        else
+        {
+            P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
+        }
+
 
     }
 
     else
     {
-        needUndoForSemGetIpc = 0;
-        V (semGetIpc, (enum Semaphore) CORRECT, 0);
+        struct sembuf oper [3];
+        oper[0].sem_num = (enum Semaphore) MUTEX;
+        oper[0].sem_op = +1;
+        oper[0].sem_flg = 0;
+        oper[1].sem_num = (enum Semaphore) MUTEX;
+        oper[1].sem_op = -1;
+        oper[1].sem_flg = SEM_UNDO;
+        oper[2].sem_num = (enum Semaphore) CORRECT;
+        oper[2].sem_op = +1;
+        oper[2].sem_flg = 0;
+        semop (semGetIpc, oper, 3);
     }
 
 
@@ -220,7 +238,7 @@ int getIpc (int *shmid, int *semid, int iAmSender)
                 {
                     LOG ("i=%d, ", i)
                     perror ("SKIP Cannot get semaphores");
-                    /* Не повезло */
+                    //* Не повезло */
                     continue;
                 }
 
@@ -251,7 +269,7 @@ int getIpc (int *shmid, int *semid, int iAmSender)
 
         if (isSemZero (*semid, (enum Semaphore) CORRECT))
         {
-            /* Создавший семафоры процесс слишком быстро завершился, не повезло */
+            /* Создавший семафоры процесс слишком быстро завершился, по факту ситуация эквивалентна той что выше */
             semctl (*semid, 0, IPC_RMID);
             continue;
         }
@@ -337,19 +355,30 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     *semid = semget (key, 4, 0666 | IPC_CREAT | IPC_EXCL);
     *shmid = shmget (key, SHMSIZE, 0666 | IPC_CREAT);
 
+    struct sembuf oper [3];
+    oper[0].sem_flg = 0;
+    oper[0].sem_num = (enum Semaphore) CORRECT;
+    oper[0].sem_op = +1;
+    oper[1].sem_flg = 0;
+    oper[1].sem_num = (enum Semaphore) META;
+    oper[1].sem_op = +1;
+    oper[2].sem_flg = SEM_UNDO;
+    oper[2].sem_num = (enum Semaphore) META;
+    oper[2].sem_op = -1;
+    semop (*semid, oper, 3);
+
     struct SharedSegment *shmem = shmat (*shmid, NULL, 0);
     shmem->senderSelected = iAmSender;
     shmem->receiverSelected = !iAmSender;
     shmem->bytesCount = 0;
 
+
     V (*semid, (enum Semaphore) NEED_WRITE, 0);
     V (*semid, (enum Semaphore) META, 0);
-    V (*semid, (enum Semaphore) CORRECT, 0);
 
     cleanup:
     
-        assert (needUndoForSemGetIpc != -1);
-        V (semGetIpc, (enum Semaphore) MUTEX, needUndoForSemGetIpc ? SEM_UNDO : 0);
+        V (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
         return exitcode;
 
 }
@@ -444,11 +473,11 @@ int sendProcess (const char *path)
     cleanup:
 
         LOG ("%s", "Cleaning up\n")
-        int semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666);
-        P (semGetIpc, 0, SEM_UNDO);
+        int semGetIpc = semget (ftok (KEYPATH, 0), 2, 0666);
+        P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
         if (shmid != -1)  shmctl (shmid, IPC_RMID, NULL);
         if (semid != -1)  semctl (semid, 0, IPC_RMID);
-        V (semGetIpc, 0, SEM_UNDO);
+        V (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
         if (fd_src != -1) close (fd_src);
 
     return exitcode;
@@ -535,11 +564,11 @@ int receiveProcess ()
 
     cleanup:
         LOG ("%s\n", "Cleaning up")
-        int semGetIpc = semget (ftok (KEYPATH, 0), 1, 0666);
-        P (semGetIpc, 0, SEM_UNDO);
+        int semGetIpc = semget (ftok (KEYPATH, 0), 2, 0666);
+        P (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
         if (shmid != -1) shmctl (shmid, IPC_RMID, NULL);
         if (semid != -1) semctl (semid, 0, IPC_RMID);
-        V (semGetIpc, 0, SEM_UNDO);
+        V (semGetIpc, (enum Semaphore) MUTEX, SEM_UNDO);
 
     return exitcode;
 }
@@ -551,7 +580,7 @@ void sigalrm_handler (int sig)
 }
 
 
-#if 0
+#if 1
 int sendProcesses (const char *path1, const char *path2)
 {
     pid_t pid = fork ();
