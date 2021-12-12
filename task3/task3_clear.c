@@ -16,7 +16,7 @@
 
 #define RESPONSE_WAIT_TIME 10000
 #define SHMSIZE 4096
-#define SHMBUFSIZE (SHMSIZE - 2 * sizeof(short) - sizeof (int))
+#define SHMBUFSIZE (SHMSIZE - sizeof (int))
 const char *KEYPATH = "/tmp/igh8734yg8hius87fiuhqf78yg348yg7uvihefviuhoh97ghoruehpiuvfsho8qrhe7fvhvourhv9";
 enum Semaphore 
 {
@@ -24,8 +24,11 @@ enum Semaphore
     MUTEX = 1,
     META = 1,
     NEED_WRITE = 2,
-    NEED_READ = 3
+    NEED_READ = 3,
+    SENDER_SELECTED = 4,
+    RECEIVER_SELECTED = 5,
 };
+
 enum Semop
 {
     ENTRY = -1,
@@ -34,8 +37,6 @@ enum Semop
 
 struct SharedSegment
 {
-    short senderSelected;
-    short receiverSelected;
     unsigned bytesCount;
     char buffer [SHMBUFSIZE];
 };
@@ -161,7 +162,7 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     for (int i = 1; i < 256; i++)
     {
         key = ftok (KEYPATH, i);
-        *semid = semget (key, 4, 0666 | IPC_CREAT);
+        *semid = semget (key, 6, 0666 | IPC_CREAT);
 
         // Проверить, созданы ли семафоры & shared memory по этому ключу
         if (*semid == -1)
@@ -210,21 +211,21 @@ int getIpc (int *shmid, int *semid, int iAmSender)
 
         struct SharedSegment *shmem = shmat (*shmid, NULL, 0);
 
-        if ((iAmSender ? shmem->senderSelected : shmem->receiverSelected) == 0)
+        if (isSemZero (*semid, iAmSender ? (enum Semaphore) SENDER_SELECTED : (enum Semaphore) RECEIVER_SELECTED))
         {
-            if (iAmSender) shmem->senderSelected = 1;
-            else         shmem->receiverSelected = 1;
-
             // if (!iAmSender) kill (getpid(), SIGKILL);
 
-            struct sembuf oper [2];
+            struct sembuf oper [3];
             oper[0].sem_flg = 0;
             oper[0].sem_num = iAmSender ? (enum Semaphore) NEED_READ : (enum Semaphore) NEED_WRITE;
             oper[0].sem_op = +10;
             oper[1].sem_flg = SEM_UNDO;
             oper[1].sem_num = iAmSender ? (enum Semaphore) NEED_READ : (enum Semaphore) NEED_WRITE;
             oper[1].sem_op = -10;
-            semop (*semid, oper, 2);
+            oper[2].sem_flg = 0;
+            oper[2].sem_num = iAmSender ? (enum Semaphore) SENDER_SELECTED : (enum Semaphore) RECEIVER_SELECTED;
+            oper[2].sem_op = +1;
+            semop (*semid, oper, 3);
 
             V (*semid, (enum Semaphore) META, SEM_UNDO);
 
@@ -270,8 +271,11 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     }
 
     key = ftok (KEYPATH, uncreatedIndex);
-    *semid = semget (key, 4, 0666 | IPC_CREAT | IPC_EXCL);
+    *semid = semget (key, 6, 0666 | IPC_CREAT | IPC_EXCL);
     *shmid = shmget (key, SHMSIZE, 0666 | IPC_CREAT);
+
+    struct SharedSegment *shmem = shmat (*shmid, NULL, 0);
+    shmem->bytesCount = 0;
 
     struct sembuf oper [5];
     oper[0].sem_flg = 0;
@@ -289,14 +293,11 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     oper[4].sem_flg = SEM_UNDO;
     oper[4].sem_num = iAmSender ? (enum Semaphore) NEED_READ : (enum Semaphore) NEED_WRITE;
     oper[4].sem_op = -10;
+    oper[5].sem_flg = 0;
+    oper[5].sem_num = iAmSender ? (enum Semaphore) SENDER_SELECTED : (enum Semaphore) RECEIVER_SELECTED;
+    oper[5].sem_op = +1;
     
-    semop (*semid, oper, 5);
-
-    struct SharedSegment *shmem = shmat (*shmid, NULL, 0);
-    shmem->senderSelected = iAmSender;
-    shmem->receiverSelected = !iAmSender;
-    shmem->bytesCount = 0;
-
+    semop (*semid, oper, 6);
 
     V (*semid, (enum Semaphore) NEED_WRITE, 0);
     V (*semid, (enum Semaphore) META, 0);
@@ -313,7 +314,6 @@ int sendProcess (const char *path)
     int exitcode = 0, shmid = -1, semid = -1, fd_src = -1, semGetIpc = -1;
     
     ASSERTED (getIpc (&shmid, &semid, 1) == 0, "Cannot get ipc for межпроцессное вз-е");
-    fprintf (stderr, "%d\n", semid);
     
 
     struct SharedSegment *shmem;
@@ -410,7 +410,6 @@ int receiveProcess ()
     int exitcode = 0, shmid = -1, semid = -1, semGetIpc = -1;
 
     ASSERTED (getIpc (&shmid, &semid, 0) == 0, "Cannot get ipc for межпроцессное вз-е");
-    fprintf (stderr, "%d\n", semid);
 
     struct SharedSegment *shmem;
     ASSERTED ((shmem = shmat (shmid, NULL, 0)) != NULL, "Can\'t attach shared memory segment");
@@ -527,7 +526,7 @@ key = ftok (KEYPATH, i);
         if (uncreatedIndex == -1)
         {
             // Проверить, созданы ли семафоры & shared memory по этому ключу
-            if ((*semid = semget (key, 4, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
+            if ((*semid = semget (key, 6, 0666 | IPC_CREAT | IPC_EXCL)) == -1)
             {
                 if (errno != EEXIST)
                 {
@@ -553,7 +552,7 @@ key = ftok (KEYPATH, i);
             
         }
 
-        *semid = semget (key, 4, 0666);
+        *semid = semget (key, 6, 0666);
 
         if (*semid == -1)
         {
