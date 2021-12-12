@@ -5,8 +5,8 @@
 #include <sys/sem.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <assert.h>
+#include <signal.h>
 #include <stdlib.h> // for exit ()
 #include <string.h> // for strcmp ()
 #include <time.h> // for time ()
@@ -14,7 +14,7 @@
 #define ASSERTED(action, message) if (!(action)) { fprintf (stderr, "%d: ", getpid ()); perror (message); exitcode = -1; goto cleanup; }
 
 
-#define RESPONSE_WAIT_TIME 10
+#define RESPONSE_WAIT_TIME 10000
 #define SHMSIZE 4096
 #define SHMBUFSIZE (SHMSIZE - 2 * sizeof(short) - sizeof (int))
 const char *KEYPATH = "/tmp/igh8734yg8hius87fiuhqf78yg348yg7uvihefviuhoh97ghoruehpiuvfsho8qrhe7fvhvourhv9";
@@ -48,6 +48,10 @@ void sigalrm_handler (int sig);
 
 int sendProcess (const char *path);
 int receiveProcess ();
+#if 1
+int sendProcesses (const char *path1, const char *path2);
+int receiveProcesses (void);
+#endif
 
 
 /* -open for 1st process, -write for second */
@@ -58,7 +62,7 @@ int main (int argc, const char **argv)
     
     if (argc == 1)
     {
-        printf ("Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
+        fprintf (stderr, "Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
         return 0;
     }
 
@@ -68,10 +72,18 @@ int main (int argc, const char **argv)
     else if (strcmp (argv[1], "-write") == 0)
         return receiveProcess ();
 
+    #if 1
+    else if (strcmp (argv[1], "-open2") == 0)
+        return sendProcesses (argv[2], argv[3]);
+    
+    else if (strcmp (argv[1], "-write2") == 0)
+        return receiveProcesses ();
+    #endif
+
     else
     {
-        printf ("%s: Unknown option: %s\n", argv[0], argv[1]);
-        printf ("Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
+        fprintf (stderr, "%s: Unknown option: %s\n", argv[0], argv[1]);
+        fprintf (stderr, "Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
         return 0;
     }
 }
@@ -203,6 +215,17 @@ int getIpc (int *shmid, int *semid, int iAmSender)
             if (iAmSender) shmem->senderSelected = 1;
             else         shmem->receiverSelected = 1;
 
+            // if (!iAmSender) kill (getpid(), SIGKILL);
+
+            struct sembuf oper [2];
+            oper[0].sem_flg = 0;
+            oper[0].sem_num = iAmSender ? (enum Semaphore) NEED_READ : (enum Semaphore) NEED_WRITE;
+            oper[0].sem_op = +10;
+            oper[1].sem_flg = SEM_UNDO;
+            oper[1].sem_num = iAmSender ? (enum Semaphore) NEED_READ : (enum Semaphore) NEED_WRITE;
+            oper[1].sem_op = -10;
+            semop (*semid, oper, 2);
+
             V (*semid, (enum Semaphore) META, SEM_UNDO);
 
             goto cleanup;
@@ -250,7 +273,7 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     *semid = semget (key, 4, 0666 | IPC_CREAT | IPC_EXCL);
     *shmid = shmget (key, SHMSIZE, 0666 | IPC_CREAT);
 
-    struct sembuf oper [3];
+    struct sembuf oper [5];
     oper[0].sem_flg = 0;
     oper[0].sem_num = (enum Semaphore) CORRECT;
     oper[0].sem_op = +1;
@@ -260,7 +283,14 @@ int getIpc (int *shmid, int *semid, int iAmSender)
     oper[2].sem_flg = SEM_UNDO;
     oper[2].sem_num = (enum Semaphore) META;
     oper[2].sem_op = -1;
-    semop (*semid, oper, 3);
+    oper[3].sem_flg = 0;
+    oper[3].sem_num = iAmSender ? (enum Semaphore) NEED_READ : (enum Semaphore) NEED_WRITE;
+    oper[3].sem_op = +10;
+    oper[4].sem_flg = SEM_UNDO;
+    oper[4].sem_num = iAmSender ? (enum Semaphore) NEED_READ : (enum Semaphore) NEED_WRITE;
+    oper[4].sem_op = -10;
+    
+    semop (*semid, oper, 5);
 
     struct SharedSegment *shmem = shmat (*shmid, NULL, 0);
     shmem->senderSelected = iAmSender;
@@ -283,16 +313,13 @@ int sendProcess (const char *path)
     int exitcode = 0, shmid = -1, semid = -1, fd_src = -1, semGetIpc = -1;
     
     ASSERTED (getIpc (&shmid, &semid, 1) == 0, "Cannot get ipc for межпроцессное вз-е");
+    fprintf (stderr, "%d\n", semid);
     
 
     struct SharedSegment *shmem;
     ASSERTED ((shmem = shmat (shmid, NULL, 0)) != NULL, "Cannot attach shared memory segment");
 
     ASSERTED ((fd_src = open (path, O_RDONLY)) != -1, "Cannot open requested file")
-
-    struct sigaction act = { };
-    act.sa_handler = sigalrm_handler;
-    sigaction (SIGALRM, &act, NULL);
 
     int bytesRead;
     struct sembuf oper[3];
@@ -323,9 +350,7 @@ int sendProcess (const char *path)
             oper[2].sem_num = (enum Semaphore) NEED_READ;
             oper[2].sem_flg = SEM_UNDO;
         
-            alarm (RESPONSE_WAIT_TIME);
             semop (semid, oper, 3);
-            alarm (0);
         }
 
         if (shmem->bytesCount != 0)
@@ -369,6 +394,7 @@ int sendProcess (const char *path)
             oper[1].sem_num = (enum Semaphore) MUTEX;
             oper[1].sem_flg = SEM_UNDO;
             oper[1].sem_op = 1;
+
             semop (semGetIpc, oper, 2);
         }
         if (shmid != -1)  shmctl (shmid, IPC_RMID, NULL);
@@ -384,14 +410,10 @@ int receiveProcess ()
     int exitcode = 0, shmid = -1, semid = -1, semGetIpc = -1;
 
     ASSERTED (getIpc (&shmid, &semid, 0) == 0, "Cannot get ipc for межпроцессное вз-е");
-    
+    fprintf (stderr, "%d\n", semid);
 
     struct SharedSegment *shmem;
     ASSERTED ((shmem = shmat (shmid, NULL, 0)) != NULL, "Can\'t attach shared memory segment");
-
-    struct sigaction act = { };
-    act.sa_handler = sigalrm_handler;
-    sigaction (SIGALRM, &act, NULL);
     
     struct sembuf oper[3];
 
@@ -420,9 +442,7 @@ int receiveProcess ()
             oper[2].sem_num = (enum Semaphore) NEED_WRITE;
             oper[2].sem_flg = SEM_UNDO;
 
-            alarm (RESPONSE_WAIT_TIME);
             semop (semid, oper, 3);
-            alarm (0);
         }
 
         if (shmem->bytesCount == 0)
@@ -469,13 +489,31 @@ int receiveProcess ()
     return exitcode;
 }
 
-void sigalrm_handler (int sig)
+
+#if 1
+int sendProcesses (const char *path1, const char *path2)
 {
-    fprintf (stderr, "Waiting for a response from a pair process has timed out\n");
-    exit (-1);
+    pid_t pid = fork ();
+    int ret = sendProcess (pid ? path2 : path1);
+    return ret;
 }
 
 
+int receiveProcesses ()
+{
+    pid_t pid = fork ();
+    int ret = receiveProcess ();
+    return ret;
+}
+
+int stressTest (const char *path)
+{
+    fork(); fork(); fork(); fork();
+    fork(); fork(); fork(); fork();
+    sendProcess (path);
+}
+
+#endif
 
 
 
