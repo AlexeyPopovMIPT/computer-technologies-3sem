@@ -28,7 +28,7 @@ if (!(action)) { perror (message); exitcode = -1; goto cleanup; }
 
 int sendProcess (const char *path);
 int receiveProcess (pid_t pid);
-#if 0
+#if 1
 int sendProcesses (const char *path1, const char *path2);
 int receiveProcesses (void);
 #endif
@@ -45,7 +45,7 @@ int main (int argc, const char **argv)
 
     if (strcmp (argv[1], "-open") == 0)
         return sendProcess (argv[2]);
-    #if 0
+    #if 1
     else if (strcmp (argv[1], "-open2") == 0)
         return sendProcesses (argv[2], argv[3]);
     
@@ -102,7 +102,7 @@ int sendProcess (const char *path)
     // making and opening default fifo
     ASSERTED (mkfifo (FIFONAME_SAMPLE, 0666) != -1 || errno == EEXIST, "Cannot make default fifo")
     LOG ("%s\n", "Made default fifo\n");
-    ASSERTED ((fd_default = open (FIFONAME_SAMPLE, O_RDWR)) != -1, "Cannot open default fifo")
+    ASSERTED ((fd_default = open (FIFONAME_SAMPLE, O_RDWR | O_NONBLOCK)) != -1, "Cannot open default fifo")
     LOG ("%s\n", "Opened default fifo\n");
 
     // making unique fifo
@@ -115,11 +115,11 @@ int sendProcess (const char *path)
     LOG ("%s", "Wrote fifoN to default fifo\n")
 
     // opening unique fifo
-    ASSERTED ((fd_unique = open (fifoname, O_WRONLY)) != -1, "Cannot open unique fifo");
+    ASSERTED ((fd_unique = open (fifoname, O_RDWR | O_NONBLOCK)) != -1, "Cannot open unique fifo");
     LOG ("Created unique fifo no %d\n", fifoN);
 
-    // desynchronize data transferring in order to prevent deadlock whether receiver terminates
-    fcntl (fd_unique, F_SETFD, O_NONBLOCK);
+    fcntl (fd_unique, F_SETFL, O_WRONLY);
+    sleep (10);
 
     // opening requested file
     ASSERTED ((fd_src = open (path, O_RDONLY)) != -1, "Cannot open requested file")
@@ -135,9 +135,6 @@ int sendProcess (const char *path)
 
         // write file to unique fifo
         ASSERTED (write (fd_unique, buffer, bytesRead) == bytesRead, "Error while writing to unique fifo")
-
-        // wait for a pair process to read file from fifo
-        sleep (1);
     }
 
     LOG ("Wrote file %s to fifo no %d\n", path, fifoN)
@@ -168,7 +165,7 @@ int receiveProcess (pid_t pid)
     // creating default fifo
     ASSERTED (mkfifo (FIFONAME_SAMPLE, 0666) != -1  || errno == EEXIST, "Cannot make default fifo")
     LOG ("%s\n", "Made default fifo\n");
-    ASSERTED ((fd_default = open (FIFONAME_SAMPLE, O_RDONLY)) != -1, "Cannot open default fifo")
+    ASSERTED ((fd_default = open (FIFONAME_SAMPLE, O_RDONLY | O_NONBLOCK)) != -1, "Cannot open default fifo")
     LOG ("%s\n", "Opened default fifo\n");
 
     // getting unique fifo number
@@ -187,7 +184,8 @@ int receiveProcess (pid_t pid)
     setFifoName (fifoname, fifoN);
 
     // opening unique fifo
-    ASSERTED ((fd_unique = open (fifoname, O_RDONLY)) != -1, "Cannot open unique fifo")
+    ASSERTED ((fd_unique = open (fifoname, O_RDONLY | O_NONBLOCK)) != -1, "Cannot open unique fifo")
+    fcntl (fd_unique, F_SETFL, O_RDONLY);
 
     // transferring data from fifo to stdout
     char buffer [PIPE_BUF];
@@ -215,7 +213,7 @@ int receiveProcess (pid_t pid)
 
 }
 
-#if 0
+#if 1
 int sendProcesses (const char *path1, const char *path2)
 {
     LOG ("%s", "Parent\n");
