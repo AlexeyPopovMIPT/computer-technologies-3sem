@@ -146,7 +146,6 @@ int getIpc (int *shmid, int *semid, int iAmSender)
         oper[1].sem_flg = SEM_UNDO;
         oper[1].sem_op = 1;
         semop (semGetIpc, oper, 2);
-        putchar (1);
     }
 
 
@@ -547,7 +546,7 @@ key = ftok (KEYPATH, i);
                 continue;
             }
 
-            
+
         }
 
         *semid = semget (key, 6, 0666);
