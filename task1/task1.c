@@ -39,7 +39,8 @@ int main (int argc, const char **argv)
 {
     if (argc == 1)
     {
-        printf ("Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
+        fprintf (stderr, "Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
+        fprintf (stderr, "Open sender first, then receiver within 10 secondes\n");
         return 0;
     }
 
@@ -58,8 +59,9 @@ int main (int argc, const char **argv)
 
     else
     {
-        printf ("%s: Unknown option: %s\n", argv[0], argv[1]);
-        printf ("Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
+        fprintf (stderr, "%s: Unknown option: %s\n", argv[0], argv[1]);
+        fprintf (stderr, "Usage: %s [-open <FILE>] or [-write]\n", argv[0]);
+        fprintf (stderr, "Open sender first, then receiver within 10 secondes\n");
         return 0;
     }
 }
