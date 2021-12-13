@@ -217,6 +217,19 @@ int receiveProcess (pid_t pid)
 
 }
 
+/*
+ * return 1 if fd1 and fd2 refer to one file, 0 otherwise
+ */
+int fd_equal (int fd_1, int fd_2)
+{
+    struct stat fd_1_properties = { }, fd_2_properties = { };
+    fstat (fd_1, &fd_1_properties);
+    fstat (fd_2, &fd_2_properties);
+    return fd_1_properties.st_ino == fd_2_properties.st_ino
+        && fd_1_properties.st_dev == fd_2_properties.st_dev;
+}
+
+
 #if 0
 int sendProcesses (const char *path1, const char *path2)
 {
