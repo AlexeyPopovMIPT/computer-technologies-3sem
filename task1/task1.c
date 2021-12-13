@@ -28,7 +28,7 @@ if (!(action)) { perror (message); exitcode = -1; goto cleanup; }
 
 int sendProcess (const char *path);
 int receiveProcess (pid_t pid);
-#if 1
+#if 0
 int sendProcesses (const char *path1, const char *path2);
 int receiveProcesses (void);
 #endif
@@ -45,7 +45,7 @@ int main (int argc, const char **argv)
 
     if (strcmp (argv[1], "-open") == 0)
         return sendProcess (argv[2]);
-    #if 1
+    #if 0
     else if (strcmp (argv[1], "-open2") == 0)
         return sendProcesses (argv[2], argv[3]);
     
@@ -115,10 +115,13 @@ int sendProcess (const char *path)
     LOG ("%s", "Wrote fifoN to default fifo\n")
 
     // opening unique fifo
-    ASSERTED ((fd_unique = open (fifoname, O_RDWR | O_NONBLOCK)) != -1, "Cannot open unique fifo");
+    int fd_fool = open (fifoname, O_RDONLY | O_NONBLOCK);
+    ASSERTED (fd_fool != -1, "Cannot open unique fifo as reader");
+    ASSERTED ((fd_unique = open (fifoname, O_WRONLY | O_NONBLOCK)) != -1, "Cannot open unique fifo");
+    close (fd_fool);
     LOG ("Created unique fifo no %d\n", fifoN);
 
-    fcntl (fd_unique, F_SETFL, O_WRONLY);
+    ASSERTED (fcntl (fd_unique, F_SETFL, O_WRONLY) != -1, "Cannot reset O_NONBLOCK from write side");
     sleep (10);
 
     // opening requested file
@@ -185,7 +188,7 @@ int receiveProcess (pid_t pid)
 
     // opening unique fifo
     ASSERTED ((fd_unique = open (fifoname, O_RDONLY | O_NONBLOCK)) != -1, "Cannot open unique fifo")
-    fcntl (fd_unique, F_SETFL, O_RDONLY);
+    ASSERTED (fcntl (fd_unique, F_SETFL, O_RDONLY) != -1, "Cannot reset O_NONBLOCK from write side");
 
     // transferring data from fifo to stdout
     char buffer [PIPE_BUF];
@@ -200,7 +203,6 @@ int receiveProcess (pid_t pid)
         ASSERTED (write (1, buffer, bytesRead) == bytesRead, "Error while writing to stdout")
     }
 
-
     cleanup:
 
         if (fd_default != -1) close (fd_default);
@@ -213,7 +215,7 @@ int receiveProcess (pid_t pid)
 
 }
 
-#if 1
+#if 0
 int sendProcesses (const char *path1, const char *path2)
 {
     LOG ("%s", "Parent\n");
