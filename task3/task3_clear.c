@@ -49,7 +49,7 @@ void sigalrm_handler (int sig);
 
 int sendProcess (const char *path);
 int receiveProcess ();
-#if 1
+#if 0
 int sendProcesses (const char *path1, const char *path2);
 int receiveProcesses (void);
 #endif
@@ -73,7 +73,7 @@ int main (int argc, const char **argv)
     else if (strcmp (argv[1], "-write") == 0)
         return receiveProcess ();
 
-    #if 1
+    #if 0
     else if (strcmp (argv[1], "-open2") == 0)
         return sendProcesses (argv[2], argv[3]);
     
@@ -213,8 +213,6 @@ int getIpc (int *shmid, int *semid, int iAmSender)
 
         if (isSemZero (*semid, iAmSender ? (enum Semaphore) SENDER_SELECTED : (enum Semaphore) RECEIVER_SELECTED))
         {
-            // if (!iAmSender) kill (getpid(), SIGKILL);
-
             struct sembuf oper [3];
             oper[0].sem_flg = 0;
             oper[0].sem_num = iAmSender ? (enum Semaphore) NEED_READ : (enum Semaphore) NEED_WRITE;
@@ -489,7 +487,7 @@ int receiveProcess ()
 }
 
 
-#if 1
+#if 0
 int sendProcesses (const char *path1, const char *path2)
 {
     pid_t pid = fork ();
@@ -571,7 +569,6 @@ key = ftok (KEYPATH, i);
 /*
 1) сендеры и ресиверы за созданные семафоры & shared memory
 2) в каждой паре сендер и ресивер за поля
-3) где аларм
 
 */
 
