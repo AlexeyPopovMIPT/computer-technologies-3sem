@@ -8,7 +8,13 @@
 #include <sys/wait.h>
 #include <string.h> // for memcpy ()
 
-#define ASSERTED(cond, ...) if (!(cond)) { fprintf (stderr, __VA_ARGS__); perror (0); exitcode = -1; goto cleanup; }
+#define ASSERTED(cond, ...)                    \
+if (!(cond))                                   \
+{                                              \
+    fprintf (stderr, __VA_ARGS__); perror (0); \
+    exitcode = -1;                             \
+    goto cleanup;                              \
+}
 
 struct Connection
 {
@@ -58,7 +64,9 @@ int main (int argc, const char **argv)
         return 0;
     }
 
-    struct Connection *connections = (struct Connection *) calloc (n, sizeof (struct Connection));
+    struct Connection *connections =
+    (struct Connection *) calloc (n, sizeof (struct Connection));
+
     ASSERTED (connections != NULL, "Memory error\n");
 
     fd_set readFds, writeFds;
@@ -70,7 +78,8 @@ int main (int argc, const char **argv)
     {
         int parentToChild [2], childToParent [2];
 
-        ASSERTED (pipe (parentToChild) != -1 && pipe (childToParent) != -1, "Can\'t create pipe\n")
+        ASSERTED (pipe (parentToChild) != -1
+               && pipe (childToParent) != -1, "Can\'t create pipe\n")
 
         connections[i].bufferSize = calculateSize (i, n);
 
@@ -102,7 +111,7 @@ int main (int argc, const char **argv)
             }
             close (childToParent[0]);
 
-            
+
             for (int j = 0; j < i; j++)
             {
                 close (connections[j].readFd);
@@ -150,7 +159,7 @@ int main (int argc, const char **argv)
 
     }
 
-    struct timeval delay = 
+    struct timeval delay =
     {
         .tv_sec = 15,
         .tv_usec = 0
@@ -163,7 +172,11 @@ int main (int argc, const char **argv)
         fd_set readyToWrite;
         memcpy (&readyToWrite, (const void*)&writeFds, sizeof (fd_set));
 
-        int ready = select (maxFd + 1, &readyToRead, &readyToWrite, NULL, &delay);
+        int ready = select (maxFd + 1,
+                            &readyToRead,
+                            &readyToWrite,
+                            NULL,
+                            &delay);
 
         ASSERTED (ready != -1, "Error in select\n")
         ASSERTED (ready !=  0, "Waiting for the responce from child processes has timed out\n")
@@ -172,14 +185,16 @@ int main (int argc, const char **argv)
         int i;
         for (i = 0; i < n; i++)
         {
-            if (connections[i].writeFd != -1 && FD_ISSET (connections[i].writeFd, &readyToWrite))
+            if (connections[i].writeFd != -1
+                && FD_ISSET (connections[i].writeFd, &readyToWrite))
             {
                 --ready;
 
-                int bytesWritten = write (connections[i].writeFd, 
-                                          connections[i].buffer + connections[i].occupiedFrom, 
-                                          connections[i].occupiedTo - connections[i].occupiedFrom);
-                
+                int bytesWritten = write (
+                    connections[i].writeFd,
+                    connections[i].buffer + connections[i].occupiedFrom,
+                    connections[i].occupiedTo - connections[i].occupiedFrom);
+
                 connections[i].occupiedFrom += bytesWritten;
 
                 if (connections[i].occupiedFrom == connections[i].occupiedTo)
@@ -188,11 +203,13 @@ int main (int argc, const char **argv)
 
             if (ready == 0) break;
 
-            if (connections[i].readFd != -1 && FD_ISSET (connections[i].readFd, &readyToRead) && connections[i+1].occupiedTo == 0)
+            if (connections[i].readFd != -1
+                && FD_ISSET (connections[i].readFd, &readyToRead)
+                && connections[i+1].occupiedTo == 0)
             {
                 --ready;
 
-                connections[i+1].occupiedTo = read (connections[i].readFd, 
+                connections[i+1].occupiedTo = read (connections[i].readFd,
                     connections[i+1].buffer, connections[i+1].bufferSize);
 
                 if (connections[i+1].occupiedTo == 0)
@@ -210,7 +227,7 @@ int main (int argc, const char **argv)
                         goto cleanup;
 
                 }
-                
+
             }
 
             if (ready == 0) break;
