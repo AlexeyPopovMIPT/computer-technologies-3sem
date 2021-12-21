@@ -242,7 +242,7 @@ int main (int argc, const char **argv)
         for (int i = 0; i < n; i++)
         {
             if (connections[i].pid > 0)
-                kill (connections[i].pid, SIGTERM);
+                waitpid (connections[i].pid, 0, 0);
         }
 
         fprintf (stderr, "-------------------\n");
