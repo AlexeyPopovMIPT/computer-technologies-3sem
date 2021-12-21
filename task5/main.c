@@ -19,8 +19,6 @@ struct Connection
     int bufferSize;
     int occupiedFrom;
     int occupiedTo;
-    int sent;
-    int received;
 };
 
 #define MIN_SIZE (128 * 1024)
@@ -43,23 +41,6 @@ int calculateSize (int i, int n)
 
 int main (int argc, const char **argv)
 {
-    #if 0
-    int fd = open ("out.txt", O_RDONLY);
-    int i = 0;
-    for (;;i++)
-    {
-        int res = 0;
-        int readd = read (fd, &res, 4);
-        if (res != i)
-        {
-            printf ("After %d got %d", i-1, res);
-            i = res;
-        }
-        if (readd == 0) break;
-    }
-    printf ("Last = %d\n", i);
-    return 0;
-    #endif
     int exitcode = 0;
 
     if (argc != 3)
@@ -128,7 +109,7 @@ int main (int argc, const char **argv)
                 close (connections[j].writeFd);
             }
 
-            // free (connections);
+            free (connections);
             return childCode (i, n, readFd, writeFd);
         }
 
@@ -188,27 +169,31 @@ int main (int argc, const char **argv)
         ASSERTED (ready !=  0, "Waiting for the responce from child processes has timed out\n")
 
         maxFd = 0;
-        for (int i = 0; i < n; i++)
+        int i;
+        for (i = 0; i < n; i++)
         {
             if (connections[i].writeFd != -1 && FD_ISSET (connections[i].writeFd, &readyToWrite))
             {
-                ready--;
+                --ready;
+
                 int bytesWritten = write (connections[i].writeFd, 
                                           connections[i].buffer + connections[i].occupiedFrom, 
                                           connections[i].occupiedTo - connections[i].occupiedFrom);
-                connections[i].sent += bytesWritten;
                 
                 connections[i].occupiedFrom += bytesWritten;
+
                 if (connections[i].occupiedFrom == connections[i].occupiedTo)
                     connections[i].occupiedFrom = (connections[i].occupiedTo = 0);
             }
 
+            if (ready == 0) break;
+
             if (connections[i].readFd != -1 && FD_ISSET (connections[i].readFd, &readyToRead) && connections[i+1].occupiedTo == 0)
             {
-                ready--;
-                connections[i+1].received += (
+                --ready;
+
                 connections[i+1].occupiedTo = read (connections[i].readFd, 
-                    connections[i+1].buffer, connections[i+1].bufferSize));
+                    connections[i+1].buffer, connections[i+1].bufferSize);
 
                 if (connections[i+1].occupiedTo == 0)
                 {
@@ -228,11 +213,21 @@ int main (int argc, const char **argv)
                 
             }
 
+            if (ready == 0) break;
+
             if (maxFd < connections[i].readFd)
                 maxFd = connections[i].readFd;
             if (maxFd < connections[i].writeFd)
                 maxFd = connections[i].writeFd;
 
+        }
+
+        for (; i < n; i++)
+        {
+            if (maxFd < connections[i].readFd)
+                maxFd = connections[i].readFd;
+            if (maxFd < connections[i].writeFd)
+                maxFd = connections[i].writeFd;
         }
 
     }
@@ -244,10 +239,6 @@ int main (int argc, const char **argv)
             if (connections[i].pid > 0)
                 waitpid (connections[i].pid, 0, 0);
         }
-
-        fprintf (stderr, "-------------------\n");
-        for (int i = 0; i < n; i++)
-            fprintf (stderr, "%d: %7d, %7d\n", i, connections[i].received, connections[i].sent);
 
         return exitcode;
 
@@ -264,20 +255,21 @@ int childCode (int i, int n, int readFd, int writeFd)
     for (;;)
     {
         ttlRead += (bytesRead = read (readFd, buffer, PIPE_BUF));
-        //fprintf (stderr, "{%d} received %d bytes\n", i, bytesRead);
 
         if (bytesRead == 0)
-            break; // return 0;
+            break;
 
         if (bytesRead == -1)
-            break; // return -1;
+        {
+            perror ("Error in read");
+            break;
+        }
 
         ttlWrote += write (writeFd, buffer, bytesRead);
-        //fprintf (stderr, "{%d} wrote to %d\n", i, writeFd);
     }
 
     close (readFd);
     close (writeFd);
+    free (buffer);
 
-    fprintf (stderr, "%d: %7d, %7d\n", i, ttlRead, ttlWrote);
 }
